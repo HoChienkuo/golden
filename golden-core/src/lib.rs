@@ -6,7 +6,14 @@ mod routing;
 pub use application::{DEFAULT_PORT, run};
 pub use error::ApplicationError;
 
-pub use response::{ResponseEntity, ResponseEntityBuilder, ResponseEntityError};
+pub use response::{
+    ApiResponse,
+    Page,
+    PaginationError,
+    ResponseEntity,
+    ResponseEntityBuilder,
+    ResponseEntityError,
+};
 
 #[doc(hidden)]
 pub use routing::RouteDefinition;

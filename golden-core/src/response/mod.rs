@@ -1,9 +1,10 @@
-mod error;
+mod api_response;
 mod entity;
+mod error;
+mod page;
 
-pub use entity::{
-    ResponseEntity,
-    ResponseEntityBuilder,
-};
+pub use entity::{ResponseEntity, ResponseEntityBuilder};
 
-pub use error::ResponseEntityError;
+pub use api_response::ApiResponse;
+pub use error::{PaginationError, ResponseEntityError};
+pub use page::Page;
