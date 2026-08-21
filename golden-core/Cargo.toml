@@ -8,3 +8,4 @@ authors.workspace = true
 axum.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+inventory.workspace = true

@@ -1,4 +1,4 @@
-use golden_core::DEFAULT_PORT;
+use crate::crate_path;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
@@ -6,6 +6,8 @@ use syn::{
     Error, Expr, ExprLit, ItemFn, Lit, MetaNameValue, ReturnType, Token, parse::Parser,
     punctuated::Punctuated,
 };
+
+const DEFAULT_PORT: u16 = 8080;
 
 pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStream2> {
     let function = syn::parse::<ItemFn>(item)?;
@@ -18,15 +20,16 @@ pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStr
     let function_name = &function.sig.ident;
     let block = &function.block;
 
+    let golden_boot = crate_path::golden_boot()?;
     Ok(quote! {
         #(#attributes)*
         #visibility fn #function_name()
             -> ::std::result::Result<
                 (),
-                ::golden_boot::ApplicationError
+                #golden_boot::ApplicationError
             >
         {
-            ::golden_boot::__private::run(
+            #golden_boot::__private::run(
                 #port,
                 async move #block,
             )

@@ -7,3 +7,7 @@ authors.workspace = true
 [dependencies]
 golden-core = { path = "../golden-core" }
 golden-macros = { path = "../golden-macros" }
+
+[dev-dependencies]
+serde.workspace = true
+trybuild.workspace = true

@@ -1,17 +1,15 @@
-use crate::ApplicationError;
+use crate::{ApplicationError, routing::create_router};
 use axum::Router;
-use axum::routing::get;
-use std::net::SocketAddr;
+use std::{future::Future, net::SocketAddr};
 
 pub const DEFAULT_PORT: u16 = 8080;
 
-pub fn run<I>(
-    port: u16,
-    initializer: I,
-) -> Result<(), ApplicationError>
+pub fn run<I>(port: u16, initializer: I) -> Result<(), ApplicationError>
 where
     I: Future<Output = ()>,
 {
+    let router = create_router()?;
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -19,13 +17,12 @@ where
 
     runtime.block_on(async move {
         initializer.await;
-        serve(port).await
+        serve(port, router).await
     })
 }
 
-async fn serve(port: u16) -> Result<(), ApplicationError> {
+async fn serve(port: u16, router: Router) -> Result<(), ApplicationError> {
     let address = SocketAddr::from(([0, 0, 0, 0], port));
-    let router = create_router();
 
     let listener = tokio::net::TcpListener::bind(address)
         .await
@@ -38,14 +35,6 @@ async fn serve(port: u16) -> Result<(), ApplicationError> {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(ApplicationError::Serve)
-}
-
-fn create_router() -> Router {
-    Router::new().route("/", get(index))
-}
-
-async fn index() -> &'static str {
-    "Hello from GoldenBoot!"
 }
 
 async fn shutdown_signal() {

@@ -7,3 +7,4 @@ publish = false
 
 [dependencies]
 golden-boot = { path = "../../golden-boot"}
+serde = { version = "1.0", features = ["derive"] }

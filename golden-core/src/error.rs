@@ -17,4 +17,16 @@ pub enum ApplicationError {
     /// The Axum HTTP server stopped because of an I/O error.
     #[error("HTTP server failed: {0}")]
     Serve(#[source] io::Error),
+
+    /// Two handlers registered the same HTTP method and path.
+    #[error(
+        "duplicate route `{method} {path}`: \
+         handlers `{first_handler}` and `{second_handler}`"
+    )]
+    DuplicateRoute {
+        method: &'static str,
+        path: &'static str,
+        first_handler: &'static str,
+        second_handler: &'static str,
+    },
 }
