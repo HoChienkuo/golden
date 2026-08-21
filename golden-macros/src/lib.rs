@@ -1,6 +1,7 @@
 mod application;
 mod mappings;
 mod crate_path;
+mod request_entity;
 
 use crate::mappings::HttpMethod;
 use proc_macro::TokenStream;
@@ -81,5 +82,25 @@ pub fn connect_mapping(arguments: TokenStream, item: TokenStream) -> TokenStream
 fn expand_mapping(arguments: TokenStream, item: TokenStream, method: HttpMethod) -> TokenStream {
     mappings::expand(arguments, item, method)
         .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_derive(
+    RequestEntity,
+    attributes(
+        request_entity,
+        path_variable,
+        request_param,
+        request_header,
+        request_body
+    )
+)]
+pub fn derive_request_entity(
+    item: TokenStream,
+) -> TokenStream {
+    request_entity::expand(item)
+        .unwrap_or_else(
+            syn::Error::into_compile_error
+        )
         .into()
 }

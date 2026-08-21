@@ -1,0 +1,5 @@
+error: a field can have only one request source
+ --> tests/ui/fail/request_entity_multiple_sources.rs:7:5
+  |
+7 |     #[request_param]
+  |     ^^^^^^^^^^^^^^^^

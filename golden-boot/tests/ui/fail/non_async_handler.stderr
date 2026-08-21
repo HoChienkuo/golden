@@ -1,0 +1,5 @@
+error: mapping handler must be async
+ --> tests/ui/fail/non_async_handler.rs:4:1
+  |
+4 | fn get_articles() {}
+  | ^^

@@ -1,0 +1,11 @@
+error: `port` must be between 1 and 65535
+ --> tests/ui/fail/invalid_port.rs:3:34
+  |
+3 | #[golden_boot_application(port = 0)]
+  |                                  ^
+
+error[E0601]: `main` function not found in crate `$CRATE`
+ --> tests/ui/fail/invalid_port.rs:4:19
+  |
+4 | async fn main() {}
+  |                   ^ consider adding a `main` function to `$DIR/tests/ui/fail/invalid_port.rs`

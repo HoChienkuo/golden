@@ -23,6 +23,10 @@ pub use golden_core::{
     ApiResponse,
     Page,
     PaginationError,
+    Validate,
+    ValidationErrors,
+    RequestEntity,
+    RequestEntityError,
 };
 
 #[doc(inline)]
@@ -37,6 +41,7 @@ pub use golden_macros::{
     post_mapping,
     put_mapping,
     trace_mapping,
+    RequestEntity,
 };
 
 #[doc(hidden)]
@@ -49,6 +54,8 @@ pub mod __private {
     pub use golden_core::__private::{
         axum,
         inventory,
+        serde,
+        validator,
     };
 }
 
@@ -66,3 +73,7 @@ pub use golden_core::web::{
     Response,
     StatusCode,
 };
+
+pub mod header {
+    pub use golden_core::header::*;
+}

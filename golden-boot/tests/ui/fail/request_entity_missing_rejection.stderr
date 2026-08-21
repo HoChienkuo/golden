@@ -1,0 +1,5 @@
+error: missing `#[request_entity(rejection = ErrorType)]`
+ --> tests/ui/fail/request_entity_missing_rejection.rs:4:8
+  |
+4 | struct Request {
+  |        ^^^^^^^

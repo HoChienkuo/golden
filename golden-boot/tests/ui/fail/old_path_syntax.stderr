@@ -1,0 +1,5 @@
+error: GoldenBoot only supports `{id}` path parameters
+ --> tests/ui/fail/old_path_syntax.rs:3:15
+  |
+3 | #[get_mapping("/articles/:id")]
+  |               ^^^^^^^^^^^^^^^

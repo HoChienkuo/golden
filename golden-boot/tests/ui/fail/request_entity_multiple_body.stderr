@@ -1,0 +1,5 @@
+error: a RequestEntity can contain at most one body-consuming field
+ --> tests/ui/fail/request_entity_multiple_body.rs:5:8
+  |
+5 | struct Request {
+  |        ^^^^^^^

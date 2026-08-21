@@ -1,0 +1,5 @@
+error: duplicate path parameter `id`
+ --> tests/ui/fail/duplicate_parameter.rs:3:15
+  |
+3 | #[get_mapping("/users/{id}/articles/{id}")]
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^

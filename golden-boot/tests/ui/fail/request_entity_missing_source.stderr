@@ -1,0 +1,5 @@
+error: every RequestEntity field must declare its request source
+ --> tests/ui/fail/request_entity_missing_source.rs:6:5
+  |
+6 |     page: u32,
+  |     ^^^^^^^^^

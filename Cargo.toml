@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["examples/hello-world","golden-boot",
+members = ["examples/hello-world", "golden-boot",
     "golden-core",
     "golden-macros"
 ]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = ["HoChienkuo <he-jianguo@qq.com>"]
 
@@ -33,5 +33,9 @@ proc-macro-crate = "3"
 trybuild = "1"
 serde = {
     version = "1",
+    features = ["derive"],
+}
+validator = {
+    version = "0.20",
     features = ["derive"],
 }

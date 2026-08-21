@@ -1,0 +1,5 @@
+error: mapping path must start with `/`
+ --> tests/ui/fail/invalid_path.rs:3:15
+  |
+3 | #[get_mapping("articles")]
+  |               ^^^^^^^^^^

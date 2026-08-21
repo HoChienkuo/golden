@@ -1,0 +1,5 @@
+error: `#[path_variable]` cannot use `Option<T>`
+ --> tests/ui/fail/request_entity_option_path.rs:7:9
+  |
+7 |     id: Option<u64>,
+  |         ^^^^^^^^^^^
