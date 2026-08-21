@@ -1,0 +1,9 @@
+[package]
+name = "golden-boot"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+golden-core = { path = "../golden-core" }
+golden-macros = { path = "../golden-macros" }

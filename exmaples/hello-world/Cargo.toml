@@ -1,0 +1,9 @@
+[package]
+name = "hello-world"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+golden-boot = { path = "../../golden-boot"}
