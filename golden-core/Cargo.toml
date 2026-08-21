@@ -9,3 +9,4 @@ axum.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 inventory.workspace = true
+serde.workspace = true

@@ -1,9 +1,7 @@
-use golden_boot::{Json, Path, Query, get_mapping, golden_boot_application, post_mapping};
-
-use serde::{
-    Deserialize,
-    Serialize,
+use golden_boot::{Path, Query, ResponseEntity, get_mapping, golden_boot_application,
 };
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 struct ArticleQuery {
@@ -20,18 +18,12 @@ struct Article {
 async fn get_article(
     Path(id): Path<u64>,
     Query(query): Query<ArticleQuery>,
-) -> Json<Article> {
-    Json(Article {
+) -> ResponseEntity<Article> {
+    ResponseEntity::ok(Article {
         id,
         page: query.page,
     })
 }
-
-#[get_mapping("/articles")]
-async fn list_articles() {}
-
-#[post_mapping("/articles")]
-async fn create_article() {}
 
 #[golden_boot_application(port = 8080)]
 async fn main() {

@@ -15,7 +15,12 @@
 //! ```
 
 #[doc(inline)]
-pub use golden_core::ApplicationError;
+pub use golden_core::{
+    ApplicationError,
+    ResponseEntity,
+    ResponseEntityBuilder,
+    ResponseEntityError,
+};
 
 #[doc(inline)]
 pub use golden_macros::{
