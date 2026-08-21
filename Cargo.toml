@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["HoChienkuo <he-jianguo@qq.com>"]
+
+[workspace.dependencies]
+axum = "0.8"
+thiserror = "2"
+tokio = {
+    version = "1",
+    features = [
+        "rt-multi-thread",
+        "macros",
+        "net",
+        "signal",
+    ]
+}
+proc-macro2 = "1"
+quote = "1"
+syn = {
+    version = "2",
+    features = ["full"]
+}
