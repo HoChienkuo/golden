@@ -186,7 +186,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "golden-boot"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "golden-core",
  "golden-macros",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "golden-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "axum",
  "inventory",
@@ -213,7 +213,7 @@ dependencies = [
 
 [[package]]
 name = "golden-macros"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "http",
  "proc-macro-crate",
@@ -230,7 +230,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hello-world"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "golden-boot",
  "serde",

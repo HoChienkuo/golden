@@ -1,0 +1,20 @@
+error[E0277]: the trait bound `StartupError: std::error::Error` is not satisfied
+ --> tests/ui/fail/application_initialization_not_error.rs:8:1
+  |
+8 | #[golden_boot_application]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `std::error::Error` is not implemented for `StartupError`
+ --> tests/ui/fail/application_initialization_not_error.rs:6:1
+  |
+6 | struct StartupError;
+  | ^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `golden_boot::__private::run_fallible`
+ --> $WORKSPACE/golden-core/src/application.rs
+  |
+  | pub fn run_fallible<I, S, E>(port: u16, initializer: I) -> Result<(), ApplicationError>
+  |        ------------ required by a bound in this function
+...
+  |     E: Error + Send + Sync + 'static,
+  |        ^^^^^ required by this bound in `run_fallible`
+  = note: this error originates in the attribute macro `golden_boot_application` (in Nightly builds, run with -Z macro-backtrace for more info)

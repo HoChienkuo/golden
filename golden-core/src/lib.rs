@@ -4,7 +4,10 @@ pub mod request;
 pub mod response;
 mod routing;
 
-pub use application::{DEFAULT_PORT, run};
+pub use application::DEFAULT_PORT;
+
+#[doc(hidden)]
+pub use application::{run, run_fallible};
 pub use error::ApplicationError;
 
 pub use response::{

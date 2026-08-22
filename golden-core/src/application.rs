@@ -3,7 +3,7 @@ use crate::{
     routing::{create_router, validate_registered_routes},
 };
 use axum::Router;
-use std::{any::Any, future::Future, net::SocketAddr};
+use std::{any::Any, convert::Infallible, error::Error, future::Future, net::SocketAddr};
 
 pub const DEFAULT_PORT: u16 = 8080;
 
@@ -11,6 +11,15 @@ pub fn run<I, S>(port: u16, initializer: I) -> Result<(), ApplicationError>
 where
     I: Future<Output = S>,
     S: Any + Clone + Send + Sync + 'static,
+{
+    run_fallible(port, async move { Ok::<S, Infallible>(initializer.await) })
+}
+
+pub fn run_fallible<I, S, E>(port: u16, initializer: I) -> Result<(), ApplicationError>
+where
+    I: Future<Output = Result<S, E>>,
+    S: Any + Clone + Send + Sync + 'static,
+    E: Error + Send + Sync + 'static,
 {
     validate_registered_routes()?;
 
@@ -20,7 +29,12 @@ where
         .map_err(ApplicationError::Runtime)?;
 
     runtime.block_on(async move {
-        let state = initializer.await;
+        let state = initializer
+            .await
+            .map_err(|source| ApplicationError::Initialization {
+                source: Box::new(source),
+            })?;
+
         let router = create_router(&state)?;
         serve(port, router).await
     })

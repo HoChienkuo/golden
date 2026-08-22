@@ -20,6 +20,13 @@ use proc_macro::TokenStream;
 /// cheap to clone, typically by containing `Arc<T>`, connection pools, and
 /// other shared handles rather than large owned collections.
 ///
+/// Initialization may fail by returning a type whose final path segment is
+/// named `Result`, such as `Result<AppState, E>`, `std::io::Result<AppState>`,
+/// or `anyhow::Result<AppState>`. Its error must implement
+/// `Error + Send + Sync + 'static`. The original error is kept as the source of
+/// `ApplicationError::Initialization`. A differently named type alias for
+/// `Result` cannot be recognized during procedural macro expansion.
+///
 /// # Example
 ///
 /// ```ignore
@@ -31,6 +38,16 @@ use proc_macro::TokenStream;
 ///     AppState {
 ///         article_service: Arc::new(ArticleService::new()),
 ///     }
+/// }
+/// ```
+///
+/// A fallible initializer can use `?` normally:
+///
+/// ```ignore
+/// #[golden_boot_application]
+/// async fn main() -> Result<AppState, StartupError> {
+///     let database = connect_database().await?;
+///     Ok(AppState::new(database))
 /// }
 /// ```
 #[proc_macro_attribute]

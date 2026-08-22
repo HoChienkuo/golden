@@ -1,11 +1,19 @@
-use std::io;
+use std::{error::Error, io};
 
 /// An error that can occur while starting or running a GoldenBoot application.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ApplicationError {
     /// The Tokio runtime could not be created.
     #[error("failed to create Tokio runtime: {0}")]
     Runtime(#[source] io::Error),
+
+    /// Application state initialization failed before the server started.
+    #[error("failed to initialize application: {source}")]
+    Initialization {
+        #[source]
+        source: Box<dyn Error + Send + Sync>,
+    },
 
     /// The HTTP server could not bind to the configured address.
     ///

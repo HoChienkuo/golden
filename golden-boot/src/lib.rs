@@ -28,7 +28,7 @@ pub use golden_macros::{
 
 #[doc(hidden)]
 pub mod __private {
-    pub use golden_core::{RouteDefinition, create_router, run};
+    pub use golden_core::{RouteDefinition, create_router, run, run_fallible};
 
     pub use golden_core::__private::{axum, inventory, serde, validator};
 }

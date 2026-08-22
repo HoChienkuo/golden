@@ -6,7 +6,7 @@ members = ["examples/hello-world", "golden-boot",
 ]
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 authors = ["HoChienkuo <he-jianguo@qq.com>"]
 

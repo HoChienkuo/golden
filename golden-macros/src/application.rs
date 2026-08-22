@@ -3,7 +3,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
-    Error, Expr, ExprLit, ItemFn, Lit, MetaNameValue, Token, parse::Parser, punctuated::Punctuated,
+    Error, Expr, ExprLit, ItemFn, Lit, MetaNameValue, PathArguments, ReturnType, Token, Type,
+    parse::Parser, punctuated::Punctuated,
 };
 
 const DEFAULT_PORT: u16 = 8080;
@@ -18,6 +19,22 @@ pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStr
     let visibility = &function.vis;
     let function_name = &function.sig.ident;
     let block = &function.block;
+    let runner = if returns_result(&function) {
+        quote!(run_fallible)
+    } else {
+        quote!(run)
+    };
+    let initializer = match &function.sig.output {
+        ReturnType::Default => quote!(async move #block),
+        ReturnType::Type(_, output) => quote! {
+            async move {
+                let __golden_application_output: #output =
+                    (async move #block).await;
+
+                __golden_application_output
+            }
+        },
+    };
 
     let golden_boot = crate_path::golden_boot()?;
     Ok(quote! {
@@ -28,12 +45,32 @@ pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStr
                 #golden_boot::ApplicationError
             >
         {
-            #golden_boot::__private::run(
+            #golden_boot::__private::#runner(
                 #port,
-                async move #block,
+                #initializer,
             )
         }
     })
+}
+
+fn returns_result(function: &ItemFn) -> bool {
+    let ReturnType::Type(_, output) = &function.sig.output else {
+        return false;
+    };
+
+    let Type::Path(type_path) = output.as_ref() else {
+        return false;
+    };
+
+    let Some(segment) = type_path.path.segments.last() else {
+        return false;
+    };
+
+    segment.ident == "Result"
+        && matches!(
+            &segment.arguments,
+            PathArguments::AngleBracketed(arguments) if !arguments.args.is_empty()
+        )
 }
 
 fn validate_application_function(function: &ItemFn) -> syn::Result<()> {
