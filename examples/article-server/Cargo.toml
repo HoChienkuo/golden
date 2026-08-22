@@ -1,0 +1,36 @@
+[package]
+name = "article-server"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+golden-boot = {
+    git = "file:///C:/code/golden"
+}
+
+serde = {
+    version = "1",
+    features = ["derive"]
+}
+
+thiserror = "2"
+
+sqlx = {
+    version = "0.9",
+    default-features = false,
+    features = [
+        "runtime-tokio",
+        "sqlite",
+        "derive",
+        "macros",
+        "migrate"
+    ]
+}
+
+validator = {
+    version = "0.20",
+    features = ["derive"]
+}
+
+[workspace]
