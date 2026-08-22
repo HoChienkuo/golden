@@ -9,14 +9,29 @@ use proc_macro::TokenStream;
 /// Marks an async `main` function as a GoldenBoot application entry point.
 ///
 /// The Axum server listens on port `8080` by default.
+/// Return a cloneable value to expose application state through Axum's
+/// `State<T>` extractor. Returning `()` creates a stateless application.
+/// Every automatically registered `State<T>` handler must use the same `T`
+/// returned by the application entry point.
+///
+/// Write the extractor directly as `State<AppState>` or
+/// `golden_boot::State<AppState>`. Type aliases for `State<T>` cannot be
+/// recognized during procedural macro expansion. Application state should be
+/// cheap to clone, typically by containing `Arc<T>`, connection pools, and
+/// other shared handles rather than large owned collections.
 ///
 /// # Example
 ///
 /// ```ignore
 /// use golden_boot::golden_boot_application;
+/// use std::sync::Arc;
 ///
 /// #[golden_boot_application(port = 9090)]
-/// async fn main() {}
+/// async fn main() -> AppState {
+///     AppState {
+///         article_service: Arc::new(ArticleService::new()),
+///     }
+/// }
 /// ```
 #[proc_macro_attribute]
 pub fn golden_boot_application(arguments: TokenStream, item: TokenStream) -> TokenStream {

@@ -11,11 +11,7 @@ pub struct ApiResponse<T = ()> {
 
 impl<T> ApiResponse<T> {
     /// Creates an API response.
-    pub fn new(
-        code: i32,
-        msg: impl Into<String>,
-        data: Option<T>,
-    ) -> Self {
+    pub fn new(code: i32, msg: impl Into<String>, data: Option<T>) -> Self {
         Self {
             code,
             msg: msg.into(),
@@ -33,10 +29,7 @@ impl<T> ApiResponse<T> {
     }
 
     /// Creates a successful response with a custom message.
-    pub fn success_with_message(
-        msg: impl Into<String>,
-        data: T,
-    ) -> Self {
+    pub fn success_with_message(msg: impl Into<String>, data: T) -> Self {
         Self {
             code: 0,
             msg: msg.into(),
@@ -45,10 +38,7 @@ impl<T> ApiResponse<T> {
     }
 
     /// Creates an error response without data.
-    pub fn error(
-        code: i32,
-        msg: impl Into<String>,
-    ) -> Self {
+    pub fn error(code: i32, msg: impl Into<String>) -> Self {
         Self {
             code,
             msg: msg.into(),
@@ -82,10 +72,7 @@ impl<T> ApiResponse<T> {
     }
 
     /// Maps the contained data while preserving code and message.
-    pub fn map<U>(
-        self,
-        mapper: impl FnOnce(T) -> U,
-    ) -> ApiResponse<U> {
+    pub fn map<U>(self, mapper: impl FnOnce(T) -> U) -> ApiResponse<U> {
         ApiResponse {
             code: self.code,
             msg: self.msg,

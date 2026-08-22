@@ -3,8 +3,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
-    Error, Expr, ExprLit, ItemFn, Lit, MetaNameValue, ReturnType, Token, parse::Parser,
-    punctuated::Punctuated,
+    Error, Expr, ExprLit, ItemFn, Lit, MetaNameValue, Token, parse::Parser, punctuated::Punctuated,
 };
 
 const DEFAULT_PORT: u16 = 8080;
@@ -77,13 +76,6 @@ fn validate_application_function(function: &ItemFn) -> syn::Result<()> {
         return Err(Error::new_spanned(
             function.sig.unsafety,
             "GoldenBoot application entry point cannot be unsafe",
-        ));
-    }
-
-    if !matches!(function.sig.output, ReturnType::Default) {
-        return Err(Error::new_spanned(
-            &function.sig.output,
-            "GoldenBoot application entry point must not declare a return type",
         ));
     }
 

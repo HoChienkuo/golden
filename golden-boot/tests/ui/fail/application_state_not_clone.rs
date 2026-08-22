@@ -1,11 +1,8 @@
-mod article;
-mod error;
-mod state;
-
 use golden_boot::golden_boot_application;
-use state::AppState;
+
+struct AppState;
 
 #[golden_boot_application]
 async fn main() -> AppState {
-    AppState::new()
+    AppState
 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{any::Any, collections::HashMap};
 
 use axum::Router;
 
@@ -9,30 +9,49 @@ pub struct RouteDefinition {
     pub method: &'static str,
     pub path: &'static str,
     pub handler_name: &'static str,
-    pub register: fn(Router) -> Router,
+    pub register:
+        fn(Router, &(dyn Any + Send + Sync), &'static str) -> Result<Router, ApplicationError>,
 }
 
 inventory::collect!(RouteDefinition);
 
-pub(crate) fn create_router() -> Result<Router, ApplicationError> {
-    let mut routes = inventory::iter::<RouteDefinition>
-        .into_iter()
-        .collect::<Vec<_>>();
+#[doc(hidden)]
+pub fn validate_registered_routes() -> Result<(), ApplicationError> {
+    let routes = registered_routes();
+    validate_routes(&routes)
+}
 
-    routes.sort_by_key(|route| (route.path, route.method, route.handler_name));
+#[doc(hidden)]
+pub fn create_router<S>(state: &S) -> Result<Router, ApplicationError>
+where
+    S: Any + Clone + Send + Sync + 'static,
+{
+    let routes = registered_routes();
 
     validate_routes(&routes)?;
 
-    let router = routes.into_iter().fold(Router::new(), |router, route| {
+    let state_type = std::any::type_name::<S>();
+    let erased_state: &(dyn Any + Send + Sync) = state;
+
+    routes.into_iter().try_fold(Router::new(), |router, route| {
+        let router = (route.register)(router, erased_state, state_type)?;
+
         println!(
             "Mapped {:7} {} -> {}",
             route.method, route.path, route.handler_name,
         );
 
-        (route.register)(router)
-    });
+        Ok(router)
+    })
+}
 
-    Ok(router)
+fn registered_routes() -> Vec<&'static RouteDefinition> {
+    let mut routes = inventory::iter::<RouteDefinition>
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    routes.sort_by_key(|route| (route.path, route.method, route.handler_name));
+    routes
 }
 
 fn validate_routes(routes: &[&RouteDefinition]) -> Result<(), ApplicationError> {
@@ -92,8 +111,12 @@ fn normalize_path(path: &str) -> String {
 mod tests {
     use super::*;
 
-    fn register(router: Router) -> Router {
-        router
+    fn register(
+        router: Router,
+        _: &(dyn Any + Send + Sync),
+        _: &'static str,
+    ) -> Result<Router, ApplicationError> {
+        Ok(router)
     }
 
     #[test]
@@ -112,10 +135,7 @@ mod tests {
             register,
         };
 
-        let result = validate_routes(&[
-            &first,
-            &second,
-        ]);
+        let result = validate_routes(&[&first, &second]);
 
         assert!(matches!(
             result,
@@ -139,17 +159,11 @@ mod tests {
             register,
         };
 
-        let result = validate_routes(&[
-            &get,
-            &head,
-        ]);
+        let result = validate_routes(&[&get, &head]);
 
         assert!(matches!(
             result,
-            Err(ApplicationError::DuplicateRoute {
-                method: "HEAD",
-                ..
-            })
+            Err(ApplicationError::DuplicateRoute { method: "HEAD", .. })
         ));
     }
 
@@ -169,10 +183,6 @@ mod tests {
             register,
         };
 
-        assert!(validate_routes(&[
-            &get,
-            &post,
-        ])
-            .is_ok());
+        assert!(validate_routes(&[&get, &post,]).is_ok());
     }
 }

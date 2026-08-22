@@ -29,4 +29,15 @@ pub enum ApplicationError {
         first_handler: &'static str,
         second_handler: &'static str,
     },
+
+    /// A handler expects a different application state type.
+    #[error(
+        "handler `{handler}` expects application state `{expected}`, \
+         but the application provides `{actual}`"
+    )]
+    StateTypeMismatch {
+        handler: &'static str,
+        expected: &'static str,
+        actual: &'static str,
+    },
 }

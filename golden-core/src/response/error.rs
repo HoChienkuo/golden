@@ -1,7 +1,4 @@
-use axum::http::header::{
-    InvalidHeaderName,
-    InvalidHeaderValue,
-};
+use axum::http::header::{InvalidHeaderName, InvalidHeaderValue};
 
 /// An error produced while building a response.
 #[derive(Debug, thiserror::Error)]

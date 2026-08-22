@@ -12,7 +12,7 @@ pub use response::{
 };
 
 #[doc(hidden)]
-pub use routing::RouteDefinition;
+pub use routing::{RouteDefinition, create_router};
 
 #[doc(hidden)]
 pub mod __private {
@@ -26,7 +26,7 @@ pub mod __private {
 pub mod web {
     pub use axum::{
         Form, Json,
-        extract::{Path, Query, Request},
+        extract::{Path, Query, Request, State},
         http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
         response::{IntoResponse, Response},
     };

@@ -1,14 +1,18 @@
-use crate::{ApplicationError, routing::create_router};
+use crate::{
+    ApplicationError,
+    routing::{create_router, validate_registered_routes},
+};
 use axum::Router;
-use std::{future::Future, net::SocketAddr};
+use std::{any::Any, future::Future, net::SocketAddr};
 
 pub const DEFAULT_PORT: u16 = 8080;
 
-pub fn run<I>(port: u16, initializer: I) -> Result<(), ApplicationError>
+pub fn run<I, S>(port: u16, initializer: I) -> Result<(), ApplicationError>
 where
-    I: Future<Output = ()>,
+    I: Future<Output = S>,
+    S: Any + Clone + Send + Sync + 'static,
 {
-    let router = create_router()?;
+    validate_registered_routes()?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -16,7 +20,8 @@ where
         .map_err(ApplicationError::Runtime)?;
 
     runtime.block_on(async move {
-        initializer.await;
+        let state = initializer.await;
+        let router = create_router(&state)?;
         serve(port, router).await
     })
 }

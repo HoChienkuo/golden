@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::response::error::PaginationError;
+use serde::Serialize;
 
 /// A one-based page of items.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -18,12 +18,7 @@ impl<T> Page<T> {
     /// Creates a one-based page.
     ///
     /// Both `page` and `size` must be greater than zero.
-    pub fn new(
-        items: Vec<T>,
-        page: u32,
-        size: u32,
-        total: u64,
-    ) -> Result<Self, PaginationError> {
+    pub fn new(items: Vec<T>, page: u32, size: u32, total: u64) -> Result<Self, PaginationError> {
         if page == 0 {
             return Err(PaginationError::InvalidPage);
         }
@@ -93,16 +88,9 @@ impl<T> Page<T> {
     }
 
     /// Maps every item while preserving pagination metadata.
-    pub fn map<U>(
-        self,
-        mut mapper: impl FnMut(T) -> U,
-    ) -> Page<U> {
+    pub fn map<U>(self, mut mapper: impl FnMut(T) -> U) -> Page<U> {
         Page {
-            items: self
-                .items
-                .into_iter()
-                .map(&mut mapper)
-                .collect(),
+            items: self.items.into_iter().map(&mut mapper).collect(),
             page: self.page,
             size: self.size,
             total: self.total,

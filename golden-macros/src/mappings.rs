@@ -3,7 +3,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use std::collections::HashSet;
-use syn::{Error, ItemFn, LitStr};
+use syn::{Error, FnArg, GenericArgument, ItemFn, LitStr, PathArguments, Type};
 
 #[derive(Clone, Copy)]
 pub enum HttpMethod {
@@ -66,6 +66,7 @@ pub fn expand(
 
     validate_path(&path)?;
     validate_handler(&function)?;
+    let state_type = handler_state_type(&function)?;
 
     let function_name = &function.sig.ident;
     let register_function = method.register_function(function_name);
@@ -74,6 +75,40 @@ pub fn expand(
     let method_name = method.name();
 
     let golden_boot = crate_path::golden_boot()?;
+    let handler_name = quote! {
+        concat!(module_path!(), "::", stringify!(#function_name))
+    };
+
+    let register_route = if let Some(state_type) = state_type {
+        quote! {
+            let state = state
+                .downcast_ref::<#state_type>()
+                .ok_or(#golden_boot::ApplicationError::StateTypeMismatch {
+                    handler: #handler_name,
+                    expected: ::std::any::type_name::<#state_type>(),
+                    actual: application_state_type,
+                })?;
+
+            Ok(router.route(
+                #path,
+                #golden_boot::__private::axum::routing::#routing_function(
+                    #function_name
+                )
+                .with_state(state.clone()),
+            ))
+        }
+    } else {
+        quote! {
+            let _ = (state, application_state_type);
+
+            Ok(router.route(
+                #path,
+                #golden_boot::__private::axum::routing::#routing_function(
+                    #function_name
+                ),
+            ))
+        }
+    };
 
     Ok(quote! {
         #function
@@ -81,28 +116,80 @@ pub fn expand(
         #[doc(hidden)]
         fn #register_function(
             router: #golden_boot::__private::axum::Router,
-        ) -> #golden_boot::__private::axum::Router {
-            router.route(
-                #path,
-                #golden_boot::__private::axum::routing::#routing_function(
-                    #function_name
-                ),
-            )
+            state: &(dyn ::std::any::Any + ::std::marker::Send + ::std::marker::Sync),
+            application_state_type: &'static str,
+        ) -> ::std::result::Result<
+            #golden_boot::__private::axum::Router,
+            #golden_boot::ApplicationError,
+        > {
+            #register_route
         }
 
         #golden_boot::__private::inventory::submit! {
             #golden_boot::__private::RouteDefinition {
                 method: #method_name,
                 path: #path,
-                handler_name: concat!(
-                    module_path!(),
-                    "::",
-                    stringify!(#function_name),
-                ),
+                handler_name: #handler_name,
                 register: #register_function,
             }
         }
     })
+}
+
+fn handler_state_type(function: &ItemFn) -> syn::Result<Option<Type>> {
+    // Procedural macros see syntax but cannot resolve aliases. Supporting
+    // automatic state binding therefore requires a directly written State<T>.
+    let mut state_type = None;
+
+    for input in &function.sig.inputs {
+        let FnArg::Typed(argument) = input else {
+            continue;
+        };
+
+        let Type::Path(type_path) = argument.ty.as_ref() else {
+            continue;
+        };
+
+        let Some(segment) = type_path.path.segments.last() else {
+            continue;
+        };
+
+        if segment.ident != "State" {
+            continue;
+        }
+
+        let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+            return Err(Error::new_spanned(
+                &argument.ty,
+                "State extractor must declare an application state type",
+            ));
+        };
+
+        let Some(GenericArgument::Type(current_state_type)) = arguments.args.first() else {
+            return Err(Error::new_spanned(
+                &argument.ty,
+                "State extractor must declare an application state type",
+            ));
+        };
+
+        if arguments.args.len() != 1 {
+            return Err(Error::new_spanned(
+                &argument.ty,
+                "State extractor must contain exactly one application state type",
+            ));
+        }
+
+        if state_type.is_some() {
+            return Err(Error::new_spanned(
+                &argument.ty,
+                "a mapping handler can contain at most one State extractor",
+            ));
+        }
+
+        state_type = Some(current_state_type.clone());
+    }
+
+    Ok(state_type)
 }
 
 fn validate_path(path: &LitStr) -> syn::Result<()> {

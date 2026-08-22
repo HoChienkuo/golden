@@ -1,6 +1,8 @@
-use golden_boot::{ApiResponse, RequestEntity, ResponseEntity, get_mapping, header, post_mapping};
+use golden_boot::{
+    ApiResponse, RequestEntity, ResponseEntity, State, get_mapping, header, post_mapping,
+};
 
-use crate::error::ApiError;
+use crate::{error::ApiError, state::AppState};
 
 #[derive(Debug, RequestEntity)]
 #[request_entity(rejection = ApiError)]
@@ -19,10 +21,14 @@ struct GetArticleRequest {
 }
 
 #[get_mapping("/articles/{id}")]
-async fn get_article(request: GetArticleRequest) -> ResponseEntity<ApiResponse<String>> {
+async fn get_article(
+    State(state): State<AppState>,
+    request: GetArticleRequest,
+) -> ResponseEntity<ApiResponse<String>> {
+    let article = state.article_service.find(request.article_id).await;
+
     ResponseEntity::ok(ApiResponse::success(format!(
-        "id={}, page={}, size={}, authorization={}",
-        request.article_id,
+        "{article}, page={}, size={}, authorization={}",
         request.page_number,
         request.size,
         request.authorization.as_deref().unwrap_or("<none>"),
