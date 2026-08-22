@@ -1,0 +1,5 @@
+error: parameter name cannot be empty
+ --> tests/ui/fail/request_entity_empty_path_name.rs:6:28
+  |
+6 |     #[path_variable(name = "")]
+  |                            ^^

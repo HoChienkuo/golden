@@ -22,10 +22,10 @@ pub use error::RequestEntityError;
 /// #[derive(RequestEntity)]
 /// #[request_entity(rejection = ApiError)]
 /// struct CreateArticleRequest<T> {
-///     #[path_variable]
-///     id: u64,
+///     #[path_variable(name = "id")]
+///     article_id: u64,
 ///
-///     #[request_param(default = 1)]
+///     #[request_param(name = "page", default = 1)]
 ///     page: u32,
 ///
 ///     #[request_header(
@@ -37,7 +37,4 @@ pub use error::RequestEntityError;
 ///     body: T,
 /// }
 /// ```
-pub trait RequestEntity:
-Sized + Send + 'static
-{
-}
+pub trait RequestEntity: Sized + Send + 'static {}

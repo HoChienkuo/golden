@@ -2,46 +2,41 @@
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum RequestEntityError {
-    #[error("missing path variable `{name}`")]
-    MissingPath {
-        name: &'static str,
-    },
+    #[error("failed to extract path variables: {message}")]
+    PathExtraction { message: String },
 
-    #[error("invalid path variable `{name}`: {message}")]
+    #[error("missing path variable `{name}`")]
+    MissingPath { name: &'static str },
+
+    #[error("invalid path variable `{name}` with value `{value}`: {message}")]
     InvalidPath {
         name: &'static str,
+        value: String,
         message: String,
     },
 
-    #[error("missing query parameter `{name}`")]
-    MissingQuery {
-        name: &'static str,
-    },
+    #[error("failed to extract query parameters: {message}")]
+    QueryExtraction { message: String },
 
-    #[error("invalid query parameter `{name}`: {message}")]
+    #[error("missing query parameter `{name}`")]
+    MissingQuery { name: &'static str },
+
+    #[error("invalid query parameter `{name}` with value `{value}`: {message}")]
     InvalidQuery {
         name: &'static str,
+        value: String,
         message: String,
     },
 
     #[error("missing request header `{name}`")]
-    MissingHeader {
-        name: &'static str,
-    },
+    MissingHeader { name: String },
 
     #[error("invalid request header `{name}`: {message}")]
-    InvalidHeader {
-        name: &'static str,
-        message: String,
-    },
+    InvalidHeader { name: String, message: String },
 
     #[error("invalid JSON request body: {message}")]
-    InvalidBody {
-        message: String,
-    },
+    InvalidBody { message: String },
 
     #[error("request validation failed: {message}")]
-    Validation {
-        message: String,
-    },
+    Validation { message: String },
 }

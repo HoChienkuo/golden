@@ -136,7 +136,7 @@ fn validate_path(path: &LitStr) -> syn::Result<()> {
 fn validate_handler(function: &ItemFn) -> syn::Result<()> {
     if function.sig.asyncness.is_none() {
         return Err(Error::new_spanned(
-            &function.sig.fn_token,
+            function.sig.fn_token,
             "mapping handler must be async",
         ));
     }
@@ -150,14 +150,14 @@ fn validate_handler(function: &ItemFn) -> syn::Result<()> {
 
     if function.sig.constness.is_some() {
         return Err(Error::new_spanned(
-            &function.sig.constness,
+            function.sig.constness,
             "mapping handler cannot be const",
         ));
     }
 
     if function.sig.unsafety.is_some() {
         return Err(Error::new_spanned(
-            &function.sig.unsafety,
+            function.sig.unsafety,
             "mapping handler cannot be unsafe",
         ));
     }

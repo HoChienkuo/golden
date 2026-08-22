@@ -47,7 +47,7 @@ fn validate_application_function(function: &ItemFn) -> syn::Result<()> {
 
     if function.sig.asyncness.is_none() {
         return Err(Error::new_spanned(
-            &function.sig.fn_token,
+            function.sig.fn_token,
             "GoldenBoot application entry point must be async",
         ));
     }
@@ -68,14 +68,14 @@ fn validate_application_function(function: &ItemFn) -> syn::Result<()> {
 
     if function.sig.constness.is_some() {
         return Err(Error::new_spanned(
-            &function.sig.constness,
+            function.sig.constness,
             "GoldenBoot application entry point cannot be const",
         ));
     }
 
     if function.sig.unsafety.is_some() {
         return Err(Error::new_spanned(
-            &function.sig.unsafety,
+            function.sig.unsafety,
             "GoldenBoot application entry point cannot be unsafe",
         ));
     }

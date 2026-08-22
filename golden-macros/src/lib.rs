@@ -1,6 +1,6 @@
 mod application;
-mod mappings;
 mod crate_path;
+mod mappings;
 mod request_entity;
 
 use crate::mappings::HttpMethod;
@@ -85,6 +85,47 @@ fn expand_mapping(arguments: TokenStream, item: TokenStream, method: HttpMethod)
         .into()
 }
 
+/// Derives a GoldenBoot request extractor for a named-field struct.
+///
+/// The struct must declare its user-defined rejection type with
+/// `#[request_entity(rejection = ErrorType)]`. Add `validate` to run its
+/// [`validator::Validate`](https://docs.rs/validator/latest/validator/trait.Validate.html)
+/// implementation after extraction.
+///
+/// # Field attributes
+///
+/// - `#[path_variable]` extracts a required path value. Use
+///   `#[path_variable(name = "id")]` when the route name differs from the
+///   Rust field name. `Option<T>` is not supported.
+/// - `#[request_param]` extracts a required query value. It supports
+///   `name = "..."`, `default`, and `default = expression`. `Option<T>` makes
+///   the value optional and cannot be combined with `default`.
+/// - `#[request_header(name = header_name)]` extracts a header. The name must
+///   be an HTTP `HeaderName` expression. `Option<T>` makes the header optional.
+/// - `#[request_body]` extracts a JSON body. A request entity can contain at
+///   most one body field.
+///
+/// When `name` is omitted from a path variable or request parameter, the Rust
+/// field name is used.
+///
+/// # Example
+///
+/// ```ignore
+/// use golden_boot::{RequestEntity, header};
+///
+/// #[derive(RequestEntity)]
+/// #[request_entity(rejection = ApiError)]
+/// struct GetArticleRequest {
+///     #[path_variable(name = "id")]
+///     article_id: u64,
+///
+///     #[request_param(default = 1)]
+///     page: u32,
+///
+///     #[request_header(name = header::AUTHORIZATION)]
+///     authorization: Option<String>,
+/// }
+/// ```
 #[proc_macro_derive(
     RequestEntity,
     attributes(
@@ -95,12 +136,8 @@ fn expand_mapping(arguments: TokenStream, item: TokenStream, method: HttpMethod)
         request_body
     )
 )]
-pub fn derive_request_entity(
-    item: TokenStream,
-) -> TokenStream {
+pub fn derive_request_entity(item: TokenStream) -> TokenStream {
     request_entity::expand(item)
-        .unwrap_or_else(
-            syn::Error::into_compile_error
-        )
+        .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

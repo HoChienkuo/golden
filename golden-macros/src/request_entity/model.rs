@@ -1,13 +1,12 @@
-use syn::{
-    Expr,
-    Ident,
-    Type,
-};
+use syn::{Expr, Ident, LitStr, Type};
 
 pub enum FieldSource {
-    PathVariable,
+    PathVariable {
+        name: Option<LitStr>,
+    },
 
     RequestParam {
+        name: Option<LitStr>,
         default: Option<DefaultValue>,
     },
 

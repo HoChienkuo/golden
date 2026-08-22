@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{DeriveInput, Generics, LitStr, Type, parse_quote};
 
 use crate::crate_path;
@@ -58,25 +58,16 @@ fn expand_parts(
 
     let has_path = fields
         .iter()
-        .any(|field| matches!(field.source, FieldSource::PathVariable));
+        .any(|field| matches!(field.source, FieldSource::PathVariable { .. }));
 
     let has_query = fields
         .iter()
         .any(|field| matches!(field.source, FieldSource::RequestParam { .. }));
 
-    let path_setup = generate_path_setup(
-        has_path,
-        quote!(__golden_parts),
-        rejection,
-        golden_boot,
-    );
+    let path_setup = generate_path_setup(has_path, quote!(__golden_parts), rejection, golden_boot);
 
-    let query_setup = generate_query_setup(
-        has_query,
-        quote!(__golden_parts),
-        rejection,
-        golden_boot,
-    );
+    let query_setup =
+        generate_query_setup(has_query, quote!(__golden_parts), rejection, golden_boot);
 
     let extractions = fields
         .iter()
@@ -153,7 +144,7 @@ fn expand_request(
 
     let has_path = fields
         .iter()
-        .any(|field| matches!(field.source, FieldSource::PathVariable));
+        .any(|field| matches!(field.source, FieldSource::PathVariable { .. }));
 
     let has_query = fields
         .iter()
@@ -254,10 +245,16 @@ fn generate_field_extraction(
     golden_boot: &TokenStream2,
 ) -> syn::Result<TokenStream2> {
     match &field.source {
-        FieldSource::PathVariable => Ok(generate_path_extraction(field, rejection, golden_boot)),
-
-        FieldSource::RequestParam { default } => Ok(generate_query_extraction(
+        FieldSource::PathVariable { name } => Ok(generate_path_extraction(
             field,
+            name.as_ref(),
+            rejection,
+            golden_boot,
+        )),
+
+        FieldSource::RequestParam { name, default } => Ok(generate_query_extraction(
+            field,
+            name.as_ref(),
             default.as_ref(),
             rejection,
             golden_boot,
@@ -314,8 +311,7 @@ fn generate_path_setup(
                 <#rejection as ::std::convert::From<
                     #golden_boot::RequestEntityError
                 >>::from(
-                    #golden_boot::RequestEntityError::InvalidPath {
-                        name: "<path>",
+                    #golden_boot::RequestEntityError::PathExtraction {
                         message: error.to_string(),
                     }
                 )
@@ -360,8 +356,7 @@ fn generate_query_setup(
                 <#rejection as ::std::convert::From<
                     #golden_boot::RequestEntityError
                 >>::from(
-                    #golden_boot::RequestEntityError::InvalidQuery {
-                        name: "<query>",
+                    #golden_boot::RequestEntityError::QueryExtraction {
                         message: error.to_string(),
                     }
                 )
@@ -371,13 +366,16 @@ fn generate_query_setup(
 
 fn generate_path_extraction(
     field: &RequestField,
+    name: Option<&LitStr>,
     rejection: &Type,
     golden_boot: &TokenStream2,
 ) -> TokenStream2 {
     let ident = &field.ident;
     let ty = &field.inner_ty;
 
-    let parameter_name = LitStr::new(&ident.to_string(), ident.span());
+    let parameter_name = name
+        .cloned()
+        .unwrap_or_else(|| LitStr::new(&ident.to_string(), ident.span()));
 
     quote! {
         let #ident = {
@@ -402,6 +400,7 @@ fn generate_path_extraction(
                     >>::from(
                         #golden_boot::RequestEntityError::InvalidPath {
                             name: #parameter_name,
+                            value: __golden_value.clone(),
                             message: error.to_string(),
                         }
                     )
@@ -412,6 +411,7 @@ fn generate_path_extraction(
 
 fn generate_query_extraction(
     field: &RequestField,
+    name: Option<&LitStr>,
     default: Option<&DefaultValue>,
     rejection: &Type,
     golden_boot: &TokenStream2,
@@ -419,7 +419,9 @@ fn generate_query_extraction(
     let ident = &field.ident;
     let ty = &field.inner_ty;
 
-    let parameter_name = LitStr::new(&ident.to_string(), ident.span());
+    let parameter_name = name
+        .cloned()
+        .unwrap_or_else(|| LitStr::new(&ident.to_string(), ident.span()));
 
     let parse_value = quote! {
         __golden_value
@@ -430,6 +432,7 @@ fn generate_query_extraction(
                 >>::from(
                     #golden_boot::RequestEntityError::InvalidQuery {
                         name: #parameter_name,
+                        value: __golden_value.clone(),
                         message: error.to_string(),
                     }
                 )
@@ -507,8 +510,7 @@ fn generate_header_extraction(
 ) -> TokenStream2 {
     let ident = &field.ident;
     let ty = &field.inner_ty;
-
-    let field_name = LitStr::new(&ident.to_string(), ident.span());
+    let header_name_ident = format_ident!("__golden_header_name_{}", ident);
 
     let parse_value = quote! {
         {
@@ -520,7 +522,7 @@ fn generate_header_extraction(
                             #golden_boot::RequestEntityError
                         >>::from(
                             #golden_boot::RequestEntityError::InvalidHeader {
-                                name: #field_name,
+                                name: #header_name_ident.as_str().to_owned(),
                                 message: error.to_string(),
                             }
                         )
@@ -533,7 +535,7 @@ fn generate_header_extraction(
                         #golden_boot::RequestEntityError
                     >>::from(
                         #golden_boot::RequestEntityError::InvalidHeader {
-                            name: #field_name,
+                            name: #header_name_ident.as_str().to_owned(),
                             message: error.to_string(),
                         }
                     )
@@ -543,10 +545,14 @@ fn generate_header_extraction(
 
     if field.optional {
         quote! {
+            let #header_name_ident:
+                #golden_boot::__private::axum::http::HeaderName =
+                    #header_name;
+
             let #ident =
                 match __golden_parts
                     .headers
-                    .get(#header_name)
+                    .get(&#header_name_ident)
                 {
                     Some(__golden_value) => {
                         Some(#parse_value)
@@ -557,17 +563,21 @@ fn generate_header_extraction(
         }
     } else {
         quote! {
+            let #header_name_ident:
+                #golden_boot::__private::axum::http::HeaderName =
+                    #header_name;
+
             let #ident = {
                 let __golden_value =
                     __golden_parts
                         .headers
-                        .get(#header_name)
+                        .get(&#header_name_ident)
                         .ok_or_else(|| {
                             <#rejection as ::std::convert::From<
                                 #golden_boot::RequestEntityError
                             >>::from(
                                 #golden_boot::RequestEntityError::MissingHeader {
-                                    name: #field_name,
+                                    name: #header_name_ident.as_str().to_owned(),
                                 }
                             )
                         })?;
@@ -692,7 +702,7 @@ fn extractor_generics(
 
     for field in fields {
         match &field.source {
-            FieldSource::PathVariable
+            FieldSource::PathVariable { .. }
             | FieldSource::RequestParam { .. }
             | FieldSource::RequestHeader { .. } => {
                 let ty = &field.inner_ty;
@@ -725,7 +735,8 @@ fn extractor_generics(
         if matches!(
             field.source,
             FieldSource::RequestParam {
-                default: Some(DefaultValue::DefaultTrait)
+                default: Some(DefaultValue::DefaultTrait),
+                ..
             }
         ) {
             let ty = &field.inner_ty;

@@ -25,13 +25,13 @@ impl IntoResponse for TestError {
 #[derive(Debug, RequestEntity)]
 #[request_entity(rejection = TestError)]
 struct ArticleParts {
-    #[path_variable]
-    id: u64,
+    #[path_variable(name = "id")]
+    article_id: u64,
 
     #[request_param(default = 1)]
     page: u32,
 
-    #[request_param]
+    #[request_param(name = "q")]
     search: Option<String>,
 
     #[request_header(name = header::AUTHORIZATION)]
@@ -41,7 +41,7 @@ struct ArticleParts {
 async fn read_article(request: ArticleParts) -> String {
     format!(
         "id={};page={};search={};authorization={}",
-        request.id,
+        request.article_id,
         request.page,
         request.search.as_deref().unwrap_or("none"),
         request.authorization.as_deref().unwrap_or("none"),
@@ -94,7 +94,7 @@ async fn extracts_path_query_default_optional_query_and_header() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/articles/42?search=golden")
+                .uri("/articles/42?q=golden")
                 .header(header::AUTHORIZATION, "Bearer test")
                 .body(Body::empty())
                 .unwrap(),
@@ -107,6 +107,132 @@ async fn extracts_path_query_default_optional_query_and_header() {
         response_text(response).await,
         "id=42;page=1;search=golden;authorization=Bearer test",
     );
+}
+
+#[derive(Debug, RequestEntity)]
+#[request_entity(rejection = TestError)]
+struct RequiredParts {
+    #[path_variable]
+    id: u64,
+
+    #[request_param(name = "page-size")]
+    page_size: u32,
+
+    #[request_header(name = header::HeaderName::from_static("x-request-id"))]
+    request_id: u64,
+}
+
+async fn required_parts(request: RequiredParts) -> String {
+    format!(
+        "id={};page-size={};request-id={}",
+        request.id, request.page_size, request.request_id,
+    )
+}
+
+#[tokio::test]
+async fn reports_missing_renamed_query_parameter() {
+    let app = Router::new().route("/required/{id}", get(required_parts));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/required/1")
+                .header("x-request-id", "9")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_text(response).await,
+        "missing query parameter `page-size`",
+    );
+}
+
+#[tokio::test]
+async fn reports_invalid_path_name_and_value() {
+    let app = Router::new().route("/required/{id}", get(required_parts));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/required/not-a-number?page-size=10")
+                .header("x-request-id", "9")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_text(response).await;
+    assert!(body.contains("path variable `id`"));
+    assert!(body.contains("value `not-a-number`"));
+}
+
+#[tokio::test]
+async fn reports_invalid_query_name_and_value() {
+    let app = Router::new().route("/required/{id}", get(required_parts));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/required/1?page-size=large")
+                .header("x-request-id", "9")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_text(response).await;
+    assert!(body.contains("query parameter `page-size`"));
+    assert!(body.contains("value `large`"));
+}
+
+#[tokio::test]
+async fn reports_the_actual_missing_header_name() {
+    let app = Router::new().route("/required/{id}", get(required_parts));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/required/1?page-size=10")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_text(response).await,
+        "missing request header `x-request-id`",
+    );
+}
+
+#[tokio::test]
+async fn reports_invalid_header_without_echoing_its_value() {
+    let app = Router::new().route("/required/{id}", get(required_parts));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/required/1?page-size=10")
+                .header("x-request-id", "secret-invalid-value")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_text(response).await;
+    assert!(body.contains("request header `x-request-id`"));
+    assert!(!body.contains("secret-invalid-value"));
 }
 
 #[tokio::test]
