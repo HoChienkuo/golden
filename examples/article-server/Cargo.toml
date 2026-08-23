@@ -5,9 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-golden-boot = {
-    git = "file:///C:/code/golden"
-}
+golden-boot = { path = "../../golden-boot" }
 
 serde = {
     version = "1",
@@ -31,6 +29,16 @@ sqlx = {
 validator = {
     version = "0.20",
     features = ["derive"]
+}
+
+tokio = {
+    version = "1",
+    features = ["time"]
+}
+
+tokio-stream = {
+    version = "0.1",
+    features = ["time"]
 }
 
 [workspace]

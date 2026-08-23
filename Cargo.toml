@@ -6,12 +6,15 @@ members = ["examples/hello-world", "golden-boot",
 ]
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 authors = ["HoChienkuo <he-jianguo@qq.com>"]
 
 [workspace.dependencies]
-axum = "0.8"
+axum = {
+    version = "0.8",
+    features = ["multipart"]
+}
 inventory = "0.3"
 thiserror = "2"
 tokio = {

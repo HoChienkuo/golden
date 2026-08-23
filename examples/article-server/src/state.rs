@@ -1,7 +1,7 @@
-use std::{str::FromStr, sync::Arc};
-
 use crate::article::service::ArticleService;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -9,8 +9,9 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub async fn initialize() -> Result<Self, sqlx::Error> {
-        let options = SqliteConnectOptions::from_str("sqlite://data/golden.db")?
+    pub async fn initialize(database_path: impl AsRef<Path>) -> Result<Self, sqlx::Error> {
+        let options = SqliteConnectOptions::new()
+            .filename(database_path)
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Wal);

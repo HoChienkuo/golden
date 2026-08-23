@@ -2,9 +2,14 @@ use crate::article::model::{Article, CreateArticleBody, UpdateArticleBody};
 use crate::error::ApiError;
 use crate::state::AppState;
 use golden_boot::{
-    ApiResponse, Page, RequestEntity, ResponseEntity, State, Validate, delete_mapping, get_mapping,
+    ApiResponse, Body, Event, IntoResponse, KeepAlive, Multipart, Page, RequestEntity, Response,
+    ResponseEntity, Sse, State, StatusCode, Validate, delete_mapping, get_mapping, header,
     post_mapping, put_mapping,
 };
+use std::convert::Infallible;
+use std::fs;
+use std::time::Duration;
+use tokio_stream::{StreamExt, wrappers::IntervalStream};
 
 #[derive(Debug, RequestEntity)]
 #[request_entity(rejection = ApiError)]
@@ -108,4 +113,57 @@ async fn delete_article(
     }
 
     Ok(ResponseEntity::ok(ApiResponse::success_empty()))
+}
+
+#[get_mapping("/file/exmaple")]
+async fn download() -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(
+            header::CONTENT_DISPOSITION,
+            r#"attachment; filename="example.txt""#,
+        )
+        .body(Body::from("Hello GoldenBoot!"))
+        .expect("static response headers are valid")
+}
+
+#[post_mapping("/upload")]
+async fn upload(mut multipart: Multipart) -> Response {
+    while let Some(field) = multipart.next_field().await.unwrap() {
+        // 保存文件
+        let file_name = field.file_name().unwrap_or("unnamed").to_string();
+        let data = field.bytes().await.unwrap();
+        fs::write(format!("./uploads/{}", file_name), data).unwrap();
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .body("Upload success".into())
+        .expect("static response headers are valid")
+}
+
+#[get_mapping("/sse/events")]
+async fn events() -> impl IntoResponse {
+    let interval = tokio::time::interval(Duration::from_secs(1));
+
+    let mut index = 0_u64;
+
+    let stream = IntervalStream::new(interval).map(move |_| {
+        let current = index;
+        index += 1;
+
+        Ok::<Event, Infallible>(
+            Event::default()
+                .event("article")
+                .id(current.to_string())
+                .data(format!("event {current}")),
+        )
+    });
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    )
 }
