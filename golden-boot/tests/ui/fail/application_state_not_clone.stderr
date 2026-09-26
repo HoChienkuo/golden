@@ -5,7 +5,7 @@ error[E0277]: the trait bound `AppState: Clone` is not satisfied
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Clone` is not implemented for `AppState`
   |
 note: required by a bound in `golden_boot::__private::run`
- --> $WORKSPACE/golden-core/src/application.rs
+ --> $WORKSPACE/golden-kernel/src/application.rs
   |
   | pub fn run<I, S>(port: u16, initializer: I) -> Result<(), ApplicationError>
   |        --- required by a bound in this function

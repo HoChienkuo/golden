@@ -3,10 +3,13 @@ name = "golden-boot"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+description = "An annotation-driven web framework built on Axum"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-golden-core = { path = "../golden-core" }
-golden-macros = { path = "../golden-macros" }
+golden-core = { package = "golden-kernel", version = "0.1.11", path = "../golden-kernel" }
+golden-macros = { version = "0.1.11", path = "../golden-macros" }
 
 [dev-dependencies]
 serde.workspace = true

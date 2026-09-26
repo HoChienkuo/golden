@@ -3,6 +3,9 @@ name = "golden-macros"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+description = "Procedural macros for GoldenBoot: mapping annotations, the golden_boot_application entry point, and RequestEntity derivation"
+license.workspace = true
+repository.workspace = true
 
 [lib]
 proc-macro = true

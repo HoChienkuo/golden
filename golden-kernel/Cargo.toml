@@ -1,8 +1,14 @@
 [package]
-name = "golden-core"
+name = "golden-kernel"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+description = "Core runtime for GoldenBoot: routing, application state, request entities, and response helpers"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "golden_core"
 
 [dependencies]
 axum.workspace = true

@@ -10,7 +10,7 @@ help: the trait `std::error::Error` is not implemented for `StartupError`
 6 | struct StartupError;
   | ^^^^^^^^^^^^^^^^^^^
 note: required by a bound in `golden_boot::__private::run_fallible`
- --> $WORKSPACE/golden-core/src/application.rs
+ --> $WORKSPACE/golden-kernel/src/application.rs
   |
   | pub fn run_fallible<I, S, E>(port: u16, initializer: I) -> Result<(), ApplicationError>
   |        ------------ required by a bound in this function

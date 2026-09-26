@@ -1,14 +1,19 @@
 [workspace]
 resolver = "3"
-members = ["examples/hello-world", "golden-boot",
-    "golden-core",
+members = [
+    "examples/hello-world",
+    "examples/article-server",
+    "golden-boot",
+    "golden-kernel",
     "golden-macros"
 ]
 
 [workspace.package]
-version = "0.1.10"
+version = "0.1.11"
 edition = "2024"
 authors = ["HoChienkuo <he-jianguo@qq.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/HoChienkuo/golden"
 
 [workspace.dependencies]
 axum = {
