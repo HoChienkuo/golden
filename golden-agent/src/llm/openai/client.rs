@@ -3,43 +3,11 @@ use bytes::Bytes;
 use futures_core::Stream;
 use futures_util::StreamExt;
 
-use crate::{
-    chat::{ChatModel, ChatStream},
-    error::{ApiErrorBody, Error},
-    request::ChatRequest,
-    response::ChatResponse,
-};
+use crate::error::{ApiErrorBody, Error};
+use crate::llm::chat::{ChatModel, ChatStream};
 
-/// Commonly used OpenAI models.
-///
-/// This list is not exhaustive and may fall behind upstream releases;
-/// use [`OpenAiModel::Custom`] for models not listed here.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OpenAiModel {
-    Gpt4o,
-    Gpt4oMini,
-    Gpt41,
-    Gpt41Mini,
-    Custom(String),
-}
-
-impl OpenAiModel {
-    pub fn as_str(&self) -> &str {
-        match self {
-            OpenAiModel::Gpt4o => "gpt-4o",
-            OpenAiModel::Gpt4oMini => "gpt-4o-mini",
-            OpenAiModel::Gpt41 => "gpt-4.1",
-            OpenAiModel::Gpt41Mini => "gpt-4.1-mini",
-            OpenAiModel::Custom(s) => s,
-        }
-    }
-}
-
-impl Default for OpenAiModel {
-    fn default() -> Self {
-        OpenAiModel::Gpt4o
-    }
-}
+use super::request::ChatRequest;
+use super::response::ChatResponse;
 
 /// The OpenAI provider, and the base implementation of the OpenAI protocol.
 ///

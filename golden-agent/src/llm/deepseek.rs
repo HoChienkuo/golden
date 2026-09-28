@@ -1,10 +1,6 @@
-use crate::{
-    chat::{ChatModel, ChatStream},
-    error::Error,
-    llm::openai::OpenAiLlm,
-    request::ChatRequest,
-    response::ChatResponse,
-};
+use crate::error::Error;
+use crate::llm::openai::{ChatRequest, ChatResponse, OpenAiLlm};
+use crate::llm::{ChatModel, ChatStream};
 use async_trait::async_trait;
 
 /// Commonly used DeepSeek models.

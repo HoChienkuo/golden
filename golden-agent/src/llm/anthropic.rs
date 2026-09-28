@@ -1,9 +1,6 @@
-use crate::{
-    chat::{ChatModel, ChatStream},
-    error::Error,
-    request::ChatRequest,
-    response::ChatResponse,
-};
+use crate::error::Error;
+use crate::llm::openai::{ChatRequest, ChatResponse};
+use crate::llm::{ChatModel, ChatStream};
 use async_trait::async_trait;
 
 /// Commonly used Anthropic models (placeholder; list not guaranteed).

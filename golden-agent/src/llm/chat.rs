@@ -3,7 +3,8 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures_core::Stream;
 
-use crate::{error::Error, request::ChatRequest, response::ChatResponse};
+use crate::error::Error;
+use crate::llm::openai::{ChatRequest, ChatResponse};
 
 /// A stream of incremental text tokens produced by a streaming chat completion.
 pub type ChatStream<'a> = Pin<Box<dyn Stream<Item = Result<String, Error>> + Send + 'a>>;
