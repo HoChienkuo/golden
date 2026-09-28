@@ -5,7 +5,8 @@ members = [
     "examples/article-server",
     "golden-boot",
     "golden-kernel",
-    "golden-macros"
+    "golden-macros",
+    "golden-agent"
 ]
 
 [workspace.package]
@@ -43,7 +44,20 @@ serde = {
     version = "1",
     features = ["derive"],
 }
+serde_json = {
+    version = "1",
+    features = ["raw_value"]
+}
 validator = {
     version = "0.20",
     features = ["derive"],
 }
+reqwest = {
+    version = "0.12",
+    default-features = false,
+    features = ["rustls-tls", "stream", "json"] }
+futures-core = "0.3"
+futures-util = "0.3"
+bytes = "1"
+async-trait = "0.1"
+async-stream = "0.3"
