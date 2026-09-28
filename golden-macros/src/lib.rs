@@ -2,6 +2,8 @@ mod application;
 mod crate_path;
 mod mappings;
 mod request_entity;
+#[cfg(feature = "agent")]
+mod tool_attr;
 
 use crate::mappings::HttpMethod;
 use proc_macro::TokenStream;
@@ -170,6 +172,35 @@ fn expand_mapping(arguments: TokenStream, item: TokenStream, method: HttpMethod)
 )]
 pub fn derive_request_entity(item: TokenStream) -> TokenStream {
     request_entity::expand(item)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Registers an `async fn` as a tool callable by a language model.
+///
+/// The tool's name defaults to the function name and its description to the
+/// doc comment. Both can be overridden with `#[tool(name = "...",
+/// description = "...")]`.
+///
+/// Parameters are derived from the function signature and exposed to the model
+/// as a JSON Schema. The return value is serialized to JSON and fed back to the
+/// model.
+///
+/// # Example
+///
+/// ```ignore
+/// use golden_agent::tool;
+///
+/// /// Get the current weather for a city.
+/// #[tool]
+/// async fn get_weather(city: String) -> String {
+///     format!("{city}: 20°C")
+/// }
+/// ```
+#[cfg(feature = "agent")]
+#[proc_macro_attribute]
+pub fn tool(arguments: TokenStream, item: TokenStream) -> TokenStream {
+    tool_attr::expand(arguments, item)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

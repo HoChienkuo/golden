@@ -18,6 +18,8 @@ futures-util.workspace = true
 bytes.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
+inventory.workspace = true
+golden-macros = { path = "../golden-macros", features = ["agent"] }
 
 [[example]]
 name = "chat_completion"

@@ -10,6 +10,12 @@ repository.workspace = true
 [lib]
 proc-macro = true
 
+[features]
+default = ["all"]
+web = []
+agent = []
+all = ["web", "agent"]
+
 [dependencies]
 proc-macro2.workspace = true
 proc-macro-crate.workspace = true
