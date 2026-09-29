@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let llm = DeepSeekLlm::from_env();
-    let tools = golden_agent::tool_specs();
+    let tools = golden_agent::tool_specs()?;
     let mut messages = vec![Message::user("What's the weather in Beijing?")];
 
     // A hand-rolled ReAct loop: send the conversation, run any tools the model
@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Looks up a registered `#[tool]` by name and invokes it with the model's
 /// JSON arguments, returning its JSON-encoded result.
 async fn call_tool(name: &str, arguments: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let tool = golden_agent::registered_tools()
+    let tool = golden_agent::registered_tools()?
         .into_iter()
         .find(|tool| tool.name == name)
         .ok_or_else(|| format!("unknown tool `{name}`"))?;

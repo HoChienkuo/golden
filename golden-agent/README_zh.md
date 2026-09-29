@@ -34,7 +34,7 @@ async fn get_weather(city: String) -> String {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = ChatRequest::new(DeepSeekModel::Flash.as_str())
         .add_message(Message::user("What's the weather in Beijing?"))
-        .tools(golden_agent::tool_specs());
+        .tools(golden_agent::tool_specs()?);
 
     let response = DeepSeekLlm::from_env().chat(&request).await?;
     println!("{}", response.text());

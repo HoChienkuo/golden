@@ -105,20 +105,35 @@ impl Tool for ToolDefinition {
 inventory::collect!(ToolDefinition);
 
 /// Returns every statically registered tool, sorted by name.
-pub fn registered_tools() -> Vec<&'static ToolDefinition> {
+///
+/// Fails with [`Error::DuplicateTool`] if two registered tools share a name, so
+/// a collision surfaces at startup instead of silently dropping a tool.
+pub fn registered_tools() -> Result<Vec<&'static ToolDefinition>, Error> {
     let mut tools = inventory::iter::<ToolDefinition>
         .into_iter()
         .collect::<Vec<_>>();
     tools.sort_by_key(|tool| tool.name);
-    tools
+
+    // Duplicates are adjacent after sorting.
+    for pair in tools.windows(2) {
+        if pair[0].name == pair[1].name {
+            return Err(Error::DuplicateTool {
+                name: pair[0].name.to_string(),
+            });
+        }
+    }
+
+    Ok(tools)
 }
 
 /// Returns the neutral [`ToolSpec`] of every registered tool, sorted by name.
-pub fn tool_specs() -> Vec<ToolSpec> {
-    registered_tools()
+///
+/// Fails with [`Error::DuplicateTool`] if two registered tools share a name.
+pub fn tool_specs() -> Result<Vec<ToolSpec>, Error> {
+    Ok(registered_tools()?
         .into_iter()
         .map(|tool| tool.spec())
-        .collect()
+        .collect())
 }
 
 /// Renders every registered tool into a provider's wire format.
@@ -129,9 +144,12 @@ pub fn tool_specs() -> Vec<ToolSpec> {
 /// ```
 /// use golden_agent::llm::{anthropic, openai};
 ///
-/// let openai_tools: Vec<openai::Tool> = golden_agent::render_tools();
-/// let anthropic_tools: Vec<anthropic::Tool> = golden_agent::render_tools();
+/// let openai_tools: Vec<openai::Tool> = golden_agent::render_tools()?;
+/// let anthropic_tools: Vec<anthropic::Tool> = golden_agent::render_tools()?;
+/// # Ok::<(), golden_agent::Error>(())
 /// ```
-pub fn render_tools<T: FromToolSpec>() -> Vec<T> {
-    tool_specs().iter().map(T::from_tool_spec).collect()
+///
+/// Fails with [`Error::DuplicateTool`] if two registered tools share a name.
+pub fn render_tools<T: FromToolSpec>() -> Result<Vec<T>, Error> {
+    Ok(tool_specs()?.iter().map(T::from_tool_spec).collect())
 }

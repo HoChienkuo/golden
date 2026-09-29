@@ -35,12 +35,9 @@ impl ToolSet {
     /// so a collision surfaces at startup instead of silently dropping a tool.
     pub fn registered() -> Result<Self, Error> {
         let mut set = Self::new();
-        for definition in registered_tools() {
-            let name = definition.name.to_string();
-            if set.tools.contains_key(&name) {
-                return Err(Error::DuplicateTool { name });
-            }
-            set.tools.insert(name, Arc::new(definition));
+        for definition in registered_tools()? {
+            set.tools
+                .insert(definition.name.to_string(), Arc::new(definition));
         }
         Ok(set)
     }
