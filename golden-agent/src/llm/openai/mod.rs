@@ -4,6 +4,7 @@ mod models;
 mod request;
 mod response;
 mod tool;
+mod translate;
 
 pub use client::OpenAiLlm;
 pub use message::{

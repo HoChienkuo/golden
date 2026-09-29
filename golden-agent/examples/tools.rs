@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let llm = DeepSeekLlm::from_env();
-    let tools = DeepSeekLlm::tools();
+    let tools = golden_agent::tool_specs();
     let mut messages = vec![Message::user("What's the weather in Beijing?")];
 
     // The agent loop: send the conversation, run any tools the model asks for,
@@ -49,29 +49,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .tools(tools.clone());
 
         let response = llm.chat(&request).await?;
+        let message = response.message;
 
-        let Some(message) = response
-            .choices
-            .first()
-            .map(|choice| choice.message.clone())
-        else {
-            eprintln!("(the model returned no choices)");
-            break;
-        };
-
-        let tool_calls = message.tool_calls.clone().unwrap_or_default();
-        if tool_calls.is_empty() {
-            println!("{}", message.content());
+        if message.tool_calls.is_empty() {
+            println!("{}", message.text());
             break;
         }
 
         // Record the assistant turn that requested the tools, then run each call
         // locally and append its result as a `tool` message for the next round.
-        messages.push(Message::assistant(message.content()).tool_calls(tool_calls.clone()));
+        messages.push(Message::assistant(message.text()).tool_calls(message.tool_calls.clone()));
 
-        for call in &tool_calls {
-            println!("-> {}({})", call.function.name, call.function.arguments);
-            let result = call_tool(&call.function.name, &call.function.arguments).await?;
+        for call in &message.tool_calls {
+            println!("-> {}({})", call.name, call.arguments);
+            let result = call_tool(&call.name, &call.arguments).await?;
             println!("<- {result}");
             messages.push(Message::tool(call.id.clone(), result));
         }

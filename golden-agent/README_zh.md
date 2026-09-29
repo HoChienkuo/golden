@@ -34,10 +34,10 @@ async fn get_weather(city: String) -> String {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = ChatRequest::new(DeepSeekModel::Flash.as_str())
         .add_message(Message::user("What's the weather in Beijing?"))
-        .tools(DeepSeekLlm::tools());
+        .tools(golden_agent::tool_specs());
 
     let response = DeepSeekLlm::from_env().chat(&request).await?;
-    println!("{}", response.choices.first().map(|c| c.text()).unwrap_or(""));
+    println!("{}", response.text());
     Ok(())
 }
 ```
@@ -50,7 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [x] 流式 / 非流式对话
 - [x] OpenAI 兼容协议（OpenAI、DeepSeek）
 - [x] `#[tool]` 工具声明、注册与按 provider 渲染
-- [ ] Anthropic、Ollama、Gemini
+- [x] Anthropic Messages API
+- [ ] Google Gemini API
+- [ ] Ollama
 - [ ] 字符串模板 / prompt 模板
 - [ ] 会话历史与上下文管理
 - [ ] 自动工具调用循环（Agent）

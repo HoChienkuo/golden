@@ -9,9 +9,10 @@
 /// Variants carrying `#[deprecated]` are on OpenAI's retirement schedule (see
 /// each variant's note). They remain callable until that date but should be
 /// migrated away from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum OpenAiModel {
     // GPT-5.x family.
+    #[default]
     Gpt5,
     Gpt5Mini,
     Gpt5Nano,
@@ -107,11 +108,5 @@ impl OpenAiModel {
             OpenAiModel::Gpt4Turbo => "gpt-4-turbo",
             OpenAiModel::Custom(s) => s,
         }
-    }
-}
-
-impl Default for OpenAiModel {
-    fn default() -> Self {
-        OpenAiModel::Gpt5
     }
 }

@@ -36,10 +36,10 @@ async fn get_weather(city: String) -> String {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = ChatRequest::new(DeepSeekModel::Flash.as_str())
         .add_message(Message::user("What's the weather in Beijing?"))
-        .tools(DeepSeekLlm::tools());
+        .tools(golden_agent::tool_specs());
 
     let response = DeepSeekLlm::from_env().chat(&request).await?;
-    println!("{}", response.choices.first().map(|c| c.text()).unwrap_or(""));
+    println!("{}", response.text());
     Ok(())
 }
 ```
@@ -53,7 +53,9 @@ streaming — live in
 - [x] Non-streaming and streaming chat
 - [x] OpenAI-compatible protocol (OpenAI, DeepSeek)
 - [x] `#[tool]` tool declaration, registration, and per-provider rendering
-- [ ] Anthropic, Ollama, and Gemini
+- [x] Anthropic Messages API
+- [ ] Google Gemini API
+- [ ] Ollama
 - [ ] String / prompt templates
 - [ ] Conversation history and context management
 - [ ] Automatic tool-calling loop (agents)

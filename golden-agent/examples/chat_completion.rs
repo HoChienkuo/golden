@@ -7,9 +7,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = ChatRequest::new(DeepSeekModel::Flash.as_str())
         .add_message(Message::user("What is 1 + 1? Just give the answer."));
     let response = llm.chat(&request).await?;
-    println!(
-        "{}",
-        response.choices.first().map(|c| c.text()).unwrap_or("")
-    );
+    println!("{}", response.text());
     Ok(())
 }

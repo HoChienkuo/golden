@@ -1,12 +1,13 @@
 use crate::error::Error;
-use crate::llm::openai::{ChatRequest, ChatResponse, OpenAiLlm, Tool};
-use crate::llm::{ChatModel, ChatStream};
+use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream};
+use crate::llm::openai::OpenAiLlm;
 use async_trait::async_trait;
 
 /// Commonly used DeepSeek models.
 /// This list may fall behind; use `Custom` for unlisted models.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum DeepSeekModel {
+    #[default]
     Flash,
     V4Pro,
     Custom(String),
@@ -19,12 +20,6 @@ impl DeepSeekModel {
             DeepSeekModel::V4Pro => "deepseek-v4-pro",
             DeepSeekModel::Custom(s) => s,
         }
-    }
-}
-
-impl Default for DeepSeekModel {
-    fn default() -> Self {
-        DeepSeekModel::Flash
     }
 }
 
@@ -49,14 +44,6 @@ impl DeepSeekLlm {
     /// Exposes the underlying OpenAI protocol implementation.
     pub fn inner(&self) -> &OpenAiLlm {
         &self.0
-    }
-
-    /// Renders every registered `#[tool]` into DeepSeek's wire format.
-    ///
-    /// DeepSeek speaks the OpenAI protocol, so this is identical to
-    /// [`OpenAiLlm::tools`](crate::llm::openai::OpenAiLlm::tools).
-    pub fn tools() -> Vec<Tool> {
-        crate::render_tools()
     }
 }
 

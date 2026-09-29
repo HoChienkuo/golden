@@ -4,11 +4,9 @@ use futures_core::Stream;
 use futures_util::StreamExt;
 
 use crate::error::{ApiErrorBody, Error};
-use crate::llm::chat::{ChatModel, ChatStream};
+use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream};
 
-use super::request::ChatRequest;
-use super::response::ChatResponse;
-use super::tool::Tool;
+use super::translate;
 
 /// The OpenAI provider, and the base implementation of the OpenAI protocol.
 ///
@@ -41,14 +39,6 @@ impl OpenAiLlm {
         &self.base_url
     }
 
-    /// Renders every registered `#[tool]` into the OpenAI wire format.
-    ///
-    /// OpenAI-compatible providers reuse this representation; see
-    /// [`DeepSeekLlm::tools`](crate::llm::DeepSeekLlm::tools).
-    pub fn tools() -> Vec<Tool> {
-        crate::render_tools()
-    }
-
     fn endpoint(&self, path: &str) -> String {
         format!("{}{}", self.base_url.trim_end_matches('/'), path)
     }
@@ -57,14 +47,13 @@ impl OpenAiLlm {
 #[async_trait]
 impl ChatModel for OpenAiLlm {
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
-        let mut req = request.clone();
-        req.stream = Some(false);
+        let body = translate::to_wire_request(request, false);
 
         let response = self
             .http
             .post(self.endpoint("/chat/completions"))
             .bearer_auth(&self.api_key)
-            .json(&req)
+            .json(&body)
             .send()
             .await?;
 
@@ -74,12 +63,12 @@ impl ChatModel for OpenAiLlm {
             return Err(Error::api(status, body));
         }
 
-        Ok(response.json::<ChatResponse>().await?)
+        let response = response.json::<super::response::ChatResponse>().await?;
+        Ok(translate::from_wire_response(response))
     }
 
     fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
-        let mut req = request.clone();
-        req.stream = Some(true);
+        let body = translate::to_wire_request(request, true);
 
         let http = self.http.clone();
         let api_key = self.api_key.clone();
@@ -89,7 +78,7 @@ impl ChatModel for OpenAiLlm {
             let response = match http
                 .post(&url)
                 .bearer_auth(&api_key)
-                .json(&req)
+                .json(&body)
                 .send()
                 .await
             {

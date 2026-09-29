@@ -32,7 +32,7 @@ golden-macros (compile time)  ->  golden-kernel / golden-agent (runtime)  ->  go
 | `golden-kernel` (lib name `golden_core`) | Tokio runtime bootstrap + graceful shutdown, `inventory` route discovery, router assembly, duplicate-route and state-type validation, `RequestEntity`, response helpers (`ApiResponse`, `ResponseEntity`, `Page`), error types, and Axum re-exports (`web`, `header`, `multipart`, `sse`, `__private`) |
 | `golden-macros` | `proc-macro = true`; `#[golden_boot_application]`, HTTP mapping attributes, `#[derive(RequestEntity)]`, `#[tool]`; features `web`, `agent`, `all` (default) |
 | `golden-boot` | User-facing facade re-exporting kernel + macros; the usual dependency for applications |
-| `golden-agent` | `#[tool]` registration via `inventory` (`ToolDefinition`); a provider-neutral tool model (`ToolSpec`, `Tool`, `FromToolSpec`, `registered_tools` / `tool_specs` / `render_tools`); per-provider rendering (`OpenAiLlm::tools`, `DeepSeekLlm::tools`, `AnthropicLlm::tools`); and `ChatModel` / `ChatStream` expressed in OpenAI wire types (OpenAI, DeepSeek and Anthropic providers, with Anthropic still a stub) |
+| `golden-agent` | `#[tool]` registration via `inventory` (`ToolDefinition`); a provider-neutral tool model (`ToolSpec`, `Tool`, `FromToolSpec`, `registered_tools` / `tool_specs` / `render_tools`); and a provider-neutral `ChatModel` / `ChatStream` (`ChatRequest`, `ChatResponse`, `Message`, `ToolSpec`-based tools) with OpenAI, DeepSeek and Anthropic providers, each translating to its own wire format |
 
 ### Examples
 

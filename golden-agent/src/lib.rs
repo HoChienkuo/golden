@@ -10,9 +10,11 @@ pub mod llm;
 pub mod tool;
 
 pub use error::{ApiErrorBody, ApiErrorDetail, Error};
-pub use llm::chat::{ChatModel, ChatStream};
-pub use llm::openai::*;
-pub use llm::{AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel};
+pub use llm::chat::{
+    ChatModel, ChatRequest, ChatResponse, ChatStream, Content, ContentPart, FinishReason, Message,
+    Role, ToolCall, ToolChoice, Usage,
+};
+pub use llm::{AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, OpenAiLlm, OpenAiModel};
 pub use tool::{
     FromToolSpec, Tool, ToolDefinition, ToolSpec, registered_tools, render_tools, tool_specs,
 };
