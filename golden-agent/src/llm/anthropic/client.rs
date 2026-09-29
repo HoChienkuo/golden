@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, VecDeque};
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_core::Stream;
@@ -5,7 +7,9 @@ use futures_util::StreamExt;
 use serde_json::Value;
 
 use crate::error::{ApiErrorBody, Error};
-use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream};
+use crate::llm::chat::{
+    ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, PartialToolCall,
+};
 use crate::llm::http::{self, HttpConfig};
 
 use super::response::MessagesResponse;
@@ -131,6 +135,8 @@ impl ChatModel for AnthropicLlm {
                 inner: response.bytes_stream(),
                 buffer: String::new(),
                 done: false,
+                pending: VecDeque::new(),
+                blocks: BTreeMap::new(),
             };
 
             while let Some(item) = events.next().await {
@@ -140,22 +146,128 @@ impl ChatModel for AnthropicLlm {
     }
 }
 
-/// A stream that extracts text deltas from Anthropic's SSE event stream.
+/// A stream that turns Anthropic's SSE event stream into [`ChatEvent`]s.
 ///
 /// Anthropic emits named server-sent events (`message_start`,
-/// `content_block_delta`, `message_delta`, `message_stop`, ...). Only text
-/// deltas are surfaced here; the [`ChatStream`] abstraction is text-only.
+/// `content_block_start`, `content_block_delta`, `content_block_stop`,
+/// `message_stop`, ...). Tool-use blocks are accumulated and surfaced as
+/// complete [`ChatEvent::ToolCall`]s when the block closes.
 struct AnthropicSseStream<S> {
     inner: S,
     buffer: String,
     done: bool,
+    pending: VecDeque<ChatEvent>,
+    blocks: BTreeMap<usize, PartialToolCall>,
+}
+
+impl<S> AnthropicSseStream<S> {
+    /// Handles one SSE line, returning a fatal error if it carries one.
+    fn handle_line(&mut self, line: &str) -> Option<Error> {
+        let data = line.strip_prefix("data:")?.trim();
+        if data.is_empty() {
+            return None;
+        }
+
+        let value: Value = match serde_json::from_str(data) {
+            Ok(value) => value,
+            Err(error) => return Some(Error::Stream(error.to_string())),
+        };
+
+        match value.get("type").and_then(Value::as_str) {
+            Some("content_block_start") => self.start_block(&value),
+            Some("content_block_delta") => self.push_delta(&value),
+            Some("content_block_stop") => self.stop_block(&value),
+            Some("message_stop") => self.done = true,
+            Some("error") => {
+                let message = value
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("anthropic stream error");
+                return Some(Error::Stream(message.to_string()));
+            }
+            _ => {}
+        }
+
+        None
+    }
+
+    /// Records a `tool_use` block that is about to stream its arguments.
+    fn start_block(&mut self, value: &Value) {
+        let block = value.get("content_block");
+        if block
+            .and_then(|block| block.get("type"))
+            .and_then(Value::as_str)
+            != Some("tool_use")
+        {
+            return;
+        }
+
+        let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let id = block
+            .and_then(|block| block.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let name = block
+            .and_then(|block| block.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        self.blocks.insert(
+            index,
+            PartialToolCall {
+                id: id.to_string(),
+                name: name.to_string(),
+                arguments: String::new(),
+            },
+        );
+    }
+
+    /// Pushes a text delta or appends to the open tool-use block's arguments.
+    fn push_delta(&mut self, value: &Value) {
+        let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let delta = value.get("delta");
+
+        match delta
+            .and_then(|delta| delta.get("type"))
+            .and_then(Value::as_str)
+        {
+            Some("text_delta") => {
+                let text = delta
+                    .and_then(|delta| delta.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !text.is_empty() {
+                    self.pending.push_back(ChatEvent::Text(text.to_string()));
+                }
+            }
+            Some("input_json_delta") => {
+                let partial = delta
+                    .and_then(|delta| delta.get("partial_json"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if let Some(block) = self.blocks.get_mut(&index) {
+                    block.arguments.push_str(partial);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Completes a tool-use block into a pending tool call.
+    fn stop_block(&mut self, value: &Value) {
+        let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+        if let Some(block) = self.blocks.remove(&index) {
+            self.pending
+                .push_back(ChatEvent::ToolCall(block.into_tool_call()));
+        }
+    }
 }
 
 impl<S> Stream for AnthropicSseStream<S>
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
 {
-    type Item = Result<String, Error>;
+    type Item = Result<ChatEvent, Error>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
@@ -166,24 +278,21 @@ where
         let this = self.get_mut();
 
         loop {
+            if let Some(event) = this.pending.pop_front() {
+                return Poll::Ready(Some(Ok(event)));
+            }
+
             if this.done {
                 return Poll::Ready(None);
             }
 
             if let Some(position) = this.buffer.find('\n') {
                 let line: String = this.buffer.drain(..=position).collect();
-                match parse_event_line(line.trim()) {
-                    Some(StreamEvent::Text(text)) => return Poll::Ready(Some(Ok(text))),
-                    Some(StreamEvent::Stop) => {
-                        this.done = true;
-                        return Poll::Ready(None);
-                    }
-                    Some(StreamEvent::Error(message)) => {
-                        this.done = true;
-                        return Poll::Ready(Some(Err(Error::Stream(message))));
-                    }
-                    None => continue,
+                if let Some(error) = this.handle_line(line.trim()) {
+                    this.done = true;
+                    return Poll::Ready(Some(Err(error)));
                 }
+                continue;
             }
 
             match futures_util::ready!(this.inner.poll_next_unpin(cx)) {
@@ -194,45 +303,9 @@ where
                 }
                 None => {
                     this.done = true;
-                    return Poll::Ready(None);
+                    continue;
                 }
             }
         }
-    }
-}
-
-/// A parsed Anthropic stream event, reduced to what [`ChatStream`] needs.
-enum StreamEvent {
-    Text(String),
-    Stop,
-    Error(String),
-}
-
-fn parse_event_line(line: &str) -> Option<StreamEvent> {
-    let data = line.strip_prefix("data:")?.trim();
-    if data.is_empty() {
-        return None;
-    }
-
-    let value: Value = match serde_json::from_str(data) {
-        Ok(value) => value,
-        Err(error) => return Some(StreamEvent::Error(error.to_string())),
-    };
-
-    match value.get("type").and_then(Value::as_str) {
-        Some("content_block_delta") => value
-            .pointer("/delta/text")
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .map(|text| StreamEvent::Text(text.to_string())),
-        Some("message_stop") => Some(StreamEvent::Stop),
-        Some("error") => {
-            let message = value
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .unwrap_or("anthropic stream error");
-            Some(StreamEvent::Error(message.to_string()))
-        }
-        _ => None,
     }
 }

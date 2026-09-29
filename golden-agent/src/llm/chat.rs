@@ -6,8 +6,20 @@ use futures_core::Stream;
 use crate::error::Error;
 use crate::tool::ToolSpec;
 
-/// A stream of incremental text tokens produced by a streaming chat completion.
-pub type ChatStream<'a> = Pin<Box<dyn Stream<Item = Result<String, Error>> + Send + 'a>>;
+/// An incremental event from a streaming chat completion.
+///
+/// Providers stream tool calls in fragments; each provider accumulates them and
+/// emits a complete [`ChatEvent::ToolCall`] once the call is finished.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChatEvent {
+    /// A chunk of assistant text.
+    Text(String),
+    /// A tool call the model finished streaming.
+    ToolCall(ToolCall),
+}
+
+/// A stream of incremental events produced by a streaming chat completion.
+pub type ChatStream<'a> = Pin<Box<dyn Stream<Item = Result<ChatEvent, Error>> + Send + 'a>>;
 
 /// A unified abstraction over chat-capable language models.
 ///
@@ -18,7 +30,7 @@ pub trait ChatModel: Send + Sync {
     /// Performs a single, non-streaming chat completion.
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error>;
 
-    /// Performs a streaming chat completion, yielding text deltas.
+    /// Performs a streaming chat completion, yielding incremental events.
     fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_>;
 }
 
@@ -104,6 +116,27 @@ pub struct ToolCall {
     pub name: String,
     /// The arguments, as a JSON-encoded string.
     pub arguments: String,
+}
+
+/// Accumulates streamed tool-call fragments into a complete tool call.
+///
+/// Shared by the providers' SSE parsers.
+#[derive(Debug, Default)]
+pub(crate) struct PartialToolCall {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) arguments: String,
+}
+
+impl PartialToolCall {
+    /// Converts the accumulated fragments into a complete [`ToolCall`].
+    pub(crate) fn into_tool_call(self) -> ToolCall {
+        ToolCall {
+            id: self.id,
+            name: self.name,
+            arguments: self.arguments,
+        }
+    }
 }
 
 /// A single message in a chat conversation.

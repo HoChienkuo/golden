@@ -5,10 +5,14 @@ mod result;
 mod state;
 mod tools;
 
+use std::pin::Pin;
 use std::sync::Arc;
 
+use futures_core::Stream;
+use futures_util::StreamExt;
+
 use crate::error::Error;
-use crate::llm::chat::{ChatModel, ChatRequest, Message};
+use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Message, ToolCall};
 
 pub use middleware::{Middleware, ModelHandler, ToolHandler};
 pub use result::AgentResult;
@@ -35,6 +39,27 @@ impl Default for AgentConfig {
         }
     }
 }
+
+/// An event from a streaming agent run.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentEvent {
+    /// A chunk of assistant text.
+    Text(String),
+    /// A tool call the model requested.
+    ToolCall(ToolCall),
+    /// A tool finished; `content` holds its result.
+    ToolResult {
+        /// The tool call that was executed.
+        call: ToolCall,
+        /// The tool's result.
+        content: String,
+    },
+    /// The run finished.
+    Done,
+}
+
+/// A stream of [`AgentEvent`]s produced by [`Agent::stream`].
+pub type AgentStream<'a> = Pin<Box<dyn Stream<Item = Result<AgentEvent, Error>> + Send + 'a>>;
 
 /// A ReAct-style agent.
 ///
@@ -76,6 +101,123 @@ impl Agent {
 
         self.run(&mut state).await?;
         Ok(AgentResult::new(state))
+    }
+
+    /// Streams a run on a single input message.
+    pub fn stream(&self, input: impl Into<Message>) -> AgentStream<'_> {
+        self.stream_messages([input.into()])
+    }
+
+    /// Streams a run on an existing conversation.
+    ///
+    /// Node-style middleware hooks and [`Middleware::wrap_tool_call`] run as in
+    /// [`invoke`](Agent::invoke). [`Middleware::wrap_model_call`] is skipped,
+    /// because it operates on a complete response rather than a delta stream.
+    pub fn stream_messages(&self, messages: impl IntoIterator<Item = Message>) -> AgentStream<'_> {
+        let input: Vec<Message> = messages.into_iter().collect();
+        let system_prompt = self.system_prompt.clone();
+        let middlewares = self.middlewares.clone();
+        let tools = self.tools.clone();
+        let request = self.request.clone();
+        let config = self.config.clone();
+        let model = Arc::clone(&self.model);
+
+        Box::pin(async_stream::stream! {
+            let mut state = AgentState::new();
+            if let Some(prompt) = &system_prompt {
+                state.messages.push(Message::system(prompt.clone()));
+            }
+            state.messages.extend(input);
+
+            for middleware in &middlewares {
+                if let Err(error) = middleware.before_agent(&mut state).await {
+                    yield Err(error);
+                    return;
+                }
+            }
+
+            let tool = middleware::tool_chain(tools.clone(), &middlewares);
+
+            let mut steps = 0;
+            loop {
+                if steps >= config.max_steps {
+                    yield Err(Error::MaxStepsExceeded { steps: config.max_steps });
+                    return;
+                }
+
+                for middleware in &middlewares {
+                    if let Err(error) = middleware.before_model(&mut state).await {
+                        yield Err(error);
+                        return;
+                    }
+                }
+
+                let mut step_request = request.clone();
+                step_request.messages = state.messages.clone();
+                step_request.tools = tools.specs();
+
+                let mut text = String::new();
+                let mut tool_calls: Vec<ToolCall> = Vec::new();
+
+                let mut stream = model.chat_stream(&step_request);
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(ChatEvent::Text(delta)) => {
+                            text.push_str(&delta);
+                            yield Ok(AgentEvent::Text(delta));
+                        }
+                        Ok(ChatEvent::ToolCall(call)) => tool_calls.push(call),
+                        Err(error) => {
+                            yield Err(error);
+                            return;
+                        }
+                    }
+                }
+
+                state
+                    .messages
+                    .push(Message::assistant(text).tool_calls(tool_calls.clone()));
+
+                for middleware in &middlewares {
+                    if let Err(error) = middleware.after_model(&mut state).await {
+                        yield Err(error);
+                        return;
+                    }
+                }
+
+                if tool_calls.is_empty() {
+                    for middleware in &middlewares {
+                        if let Err(error) = middleware.after_agent(&mut state).await {
+                            yield Err(error);
+                            return;
+                        }
+                    }
+                    yield Ok(AgentEvent::Done);
+                    return;
+                }
+
+                for call in tool_calls {
+                    yield Ok(AgentEvent::ToolCall(call.clone()));
+
+                    let content = match tool.handle(call.clone()).await {
+                        Ok(content) => content,
+                        Err(error) if config.abort_on_tool_error => {
+                            yield Err(error);
+                            return;
+                        }
+                        Err(error) => format!("Error: {error}"),
+                    };
+
+                    state.messages.push(Message::tool(call.id.clone(), content.clone()));
+                    yield Ok(AgentEvent::ToolResult {
+                        call,
+                        content,
+                    });
+                }
+
+                steps += 1;
+            }
+        })
     }
 
     /// Returns the tools the agent may call.

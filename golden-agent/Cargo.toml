@@ -26,6 +26,10 @@ name = "agent"
 path = "examples/agent.rs"
 
 [[example]]
+name = "agent_stream"
+path = "examples/agent_stream.rs"
+
+[[example]]
 name = "chat_completion"
 path = "examples/chat_completion.rs"
 

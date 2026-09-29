@@ -11,13 +11,13 @@ pub mod llm;
 pub mod tool;
 
 pub use agent::{
-    Agent, AgentBuilder, AgentConfig, AgentResult, AgentState, Middleware, ModelHandler,
-    ToolHandler, ToolSet,
+    Agent, AgentBuilder, AgentConfig, AgentEvent, AgentResult, AgentState, AgentStream, Middleware,
+    ModelHandler, ToolHandler, ToolSet,
 };
 pub use error::{ApiErrorBody, ApiErrorDetail, Error};
 pub use llm::chat::{
-    ChatModel, ChatRequest, ChatResponse, ChatStream, Content, ContentPart, FinishReason, Message,
-    Role, ToolCall, ToolChoice, Usage,
+    ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, Content, ContentPart,
+    FinishReason, Message, Role, ToolCall, ToolChoice, Usage,
 };
 pub use llm::{
     AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, HttpConfig, OpenAiLlm, OpenAiModel,

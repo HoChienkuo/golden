@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use golden_agent::{ChatModel, ChatRequest, DeepSeekLlm, DeepSeekModel, Message};
+use golden_agent::{ChatEvent, ChatModel, ChatRequest, DeepSeekLlm, DeepSeekModel, Message};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,10 +11,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut stream = llm.chat_stream(&request);
 
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(text) => print!("{text}"),
-            Err(e) => eprintln!("\nstream error: {e}"),
+    while let Some(event) = stream.next().await {
+        match event? {
+            ChatEvent::Text(text) => print!("{text}"),
+            ChatEvent::ToolCall(call) => println!("\n[tool] {}({})", call.name, call.arguments),
         }
     }
     println!();

@@ -1,10 +1,14 @@
+use std::collections::{BTreeMap, VecDeque};
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_core::Stream;
 use futures_util::StreamExt;
 
 use crate::error::{ApiErrorBody, Error};
-use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream};
+use crate::llm::chat::{
+    ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, PartialToolCall,
+};
 use crate::llm::http::{self, HttpConfig};
 
 use super::translate;
@@ -120,6 +124,8 @@ impl ChatModel for OpenAiLlm {
                 inner,
                 buffer: String::new(),
                 done: false,
+                pending: VecDeque::new(),
+                tool_calls: BTreeMap::new(),
             };
 
             while let Some(item) = line_stream.next().await {
@@ -129,80 +135,115 @@ impl ChatModel for OpenAiLlm {
     }
 }
 
-/// A stream that extracts incremental text line-by-line from an SSE byte stream.
+/// A stream that turns an OpenAI SSE byte stream into [`ChatEvent`]s.
+///
+/// Tool-call fragments spread across chunks are accumulated by index and emitted
+/// as complete [`ChatEvent::ToolCall`]s when the stream ends.
 struct SseLineStream<S> {
     inner: S,
     buffer: String,
     done: bool,
+    pending: VecDeque<ChatEvent>,
+    tool_calls: BTreeMap<usize, PartialToolCall>,
+}
+
+impl<S> SseLineStream<S> {
+    /// Merges a parsed chunk into the pending events and tool-call buffers.
+    fn handle_chunk(&mut self, chunk: StreamData) {
+        for choice in chunk.choices {
+            let content = choice.delta.content.unwrap_or_default();
+            if !content.is_empty() {
+                self.pending.push_back(ChatEvent::Text(content));
+            }
+
+            for tool_call in choice.delta.tool_calls {
+                let partial = self.tool_calls.entry(tool_call.index).or_default();
+                if let Some(id) = tool_call.id {
+                    partial.id = id;
+                }
+                if let Some(function) = tool_call.function {
+                    if let Some(name) = function.name {
+                        partial.name.push_str(&name);
+                    }
+                    if let Some(arguments) = function.arguments {
+                        partial.arguments.push_str(&arguments);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Moves the accumulated tool calls into the pending events.
+    fn flush_tool_calls(&mut self) {
+        for (_, partial) in std::mem::take(&mut self.tool_calls) {
+            self.pending
+                .push_back(ChatEvent::ToolCall(partial.into_tool_call()));
+        }
+    }
 }
 
 impl<S> Stream for SseLineStream<S>
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
 {
-    type Item = Result<String, Error>;
+    type Item = Result<ChatEvent, Error>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        use std::task::Poll;
+
         let this = self.get_mut();
 
         loop {
-            if this.done {
-                return std::task::Poll::Ready(None);
+            if let Some(event) = this.pending.pop_front() {
+                return Poll::Ready(Some(Ok(event)));
             }
 
-            if let Some(pos) = this.buffer.find('\n') {
-                let line: String = this.buffer.drain(..=pos).collect();
+            if this.done {
+                return Poll::Ready(None);
+            }
+
+            if let Some(position) = this.buffer.find('\n') {
+                let line: String = this.buffer.drain(..=position).collect();
                 let line = line.trim();
+
                 if line == "data: [DONE]" {
                     this.done = true;
-                    return std::task::Poll::Ready(None);
+                    this.flush_tool_calls();
+                    continue;
                 }
-                if let Some(text) = parse_data_line(line) {
-                    return std::task::Poll::Ready(Some(text));
+
+                if let Some(data) = line.strip_prefix("data:") {
+                    let data = data.trim();
+                    if !data.is_empty() {
+                        match serde_json::from_str::<StreamData>(data) {
+                            Ok(chunk) => this.handle_chunk(chunk),
+                            Err(error) => {
+                                this.done = true;
+                                return Poll::Ready(Some(Err(Error::Stream(error.to_string()))));
+                            }
+                        }
+                    }
                 }
+
                 continue;
             }
 
             match futures_util::ready!(this.inner.poll_next_unpin(cx)) {
-                Some(Ok(bytes)) => {
-                    this.buffer.push_str(&String::from_utf8_lossy(&bytes));
-                }
-                Some(Err(e)) => {
+                Some(Ok(bytes)) => this.buffer.push_str(&String::from_utf8_lossy(&bytes)),
+                Some(Err(error)) => {
                     this.done = true;
-                    return std::task::Poll::Ready(Some(Err(Error::Request(e))));
+                    return Poll::Ready(Some(Err(Error::Request(error))));
                 }
                 None => {
                     this.done = true;
-                    return std::task::Poll::Ready(None);
+                    this.flush_tool_calls();
+                    continue;
                 }
             }
         }
-    }
-}
-
-fn parse_data_line(line: &str) -> Option<Result<String, Error>> {
-    let line = line.trim();
-    let data = line.strip_prefix("data:")?.trim();
-    if data.is_empty() || data == "[DONE]" {
-        return None;
-    }
-    match serde_json::from_str::<StreamData>(data) {
-        Ok(chunk) => {
-            let text = chunk
-                .choices
-                .first()
-                .and_then(|c| c.delta.content.as_deref())
-                .unwrap_or("");
-            if text.is_empty() {
-                None
-            } else {
-                Some(Ok(text.to_string()))
-            }
-        }
-        Err(e) => Some(Err(Error::Stream(e.to_string()))),
     }
 }
 
@@ -222,4 +263,24 @@ struct StreamDeltaChoice {
 struct StreamDeltaContent {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<StreamToolCall>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct StreamToolCall {
+    #[serde(default)]
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<StreamFunction>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct StreamFunction {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
