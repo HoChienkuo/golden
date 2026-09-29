@@ -7,9 +7,6 @@ description = "Core runtime for GoldenBoot: routing, application state, request 
 license.workspace = true
 repository.workspace = true
 
-[lib]
-name = "golden_core"
-
 [dependencies]
 axum.workspace = true
 thiserror.workspace = true

@@ -15,7 +15,7 @@
 //! ```
 
 #[doc(inline)]
-pub use golden_core::{
+pub use golden_kernel::{
     ApiResponse, ApplicationError, Page, PaginationError, RequestEntity, RequestEntityError,
     ResponseEntity, ResponseEntityBuilder, ResponseEntityError, Validate, ValidationErrors,
 };
@@ -28,25 +28,25 @@ pub use golden_macros::{
 
 #[doc(hidden)]
 pub mod __private {
-    pub use golden_core::{RouteDefinition, create_router, run, run_fallible};
+    pub use golden_kernel::{RouteDefinition, create_router, run, run_fallible};
 
-    pub use golden_core::__private::{axum, inventory, serde, validator};
+    pub use golden_kernel::__private::{axum, inventory, serde, validator};
 }
 
-pub use golden_core::web::{
+pub use golden_kernel::web::{
     Body, BodyDataStream, Bytes, DefaultBodyLimit, Event, Form, HeaderMap, HeaderName, HeaderValue,
     IntoResponse, Json, KeepAlive, Method, Multipart, Path, Query, Request, Response, Sse, State,
     StatusCode,
 };
 
 pub mod header {
-    pub use golden_core::header::*;
+    pub use golden_kernel::header::*;
 }
 
 pub mod multipart {
-    pub use golden_core::multipart::*;
+    pub use golden_kernel::multipart::*;
 }
 
 pub mod sse {
-    pub use golden_core::sse::*;
+    pub use golden_kernel::sse::*;
 }

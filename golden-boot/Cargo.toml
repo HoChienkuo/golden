@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-golden-core = { package = "golden-kernel", version = "0.1.11", path = "../golden-kernel" }
+golden-kernel = { version = "0.1.11", path = "../golden-kernel" }
 golden-macros = { version = "0.1.11", path = "../golden-macros" }
 
 [dev-dependencies]
