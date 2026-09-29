@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::tool::{FromToolSpec, ToolSpec};
+
 /// The type discriminator used by tool-related objects.
 ///
 /// OpenAI currently defines only `"function"`.
@@ -35,6 +37,16 @@ impl Tool {
                 strict: None,
             },
         }
+    }
+}
+
+impl FromToolSpec for Tool {
+    fn from_tool_spec(spec: &ToolSpec) -> Self {
+        Tool::function(
+            spec.name.to_string(),
+            Some(spec.description.to_string()),
+            Some(spec.input_schema.clone()),
+        )
     }
 }
 

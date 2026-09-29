@@ -1,4 +1,4 @@
-mod anthropic;
+pub mod anthropic;
 mod deepseek;
 
 pub mod chat;

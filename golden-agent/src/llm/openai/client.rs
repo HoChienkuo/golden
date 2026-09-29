@@ -8,6 +8,7 @@ use crate::llm::chat::{ChatModel, ChatStream};
 
 use super::request::ChatRequest;
 use super::response::ChatResponse;
+use super::tool::Tool;
 
 /// The OpenAI provider, and the base implementation of the OpenAI protocol.
 ///
@@ -38,6 +39,14 @@ impl OpenAiLlm {
     /// Returns the current base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Renders every registered `#[tool]` into the OpenAI wire format.
+    ///
+    /// OpenAI-compatible providers reuse this representation; see
+    /// [`DeepSeekLlm::tools`](crate::llm::DeepSeekLlm::tools).
+    pub fn tools() -> Vec<Tool> {
+        crate::render_tools()
     }
 
     fn endpoint(&self, path: &str) -> String {

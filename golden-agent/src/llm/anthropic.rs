@@ -1,7 +1,10 @@
+use async_trait::async_trait;
+use serde::Serialize;
+
 use crate::error::Error;
 use crate::llm::openai::{ChatRequest, ChatResponse};
 use crate::llm::{ChatModel, ChatStream};
-use async_trait::async_trait;
+use crate::tool::{FromToolSpec, ToolSpec};
 
 /// Commonly used Anthropic models (placeholder; list not guaranteed).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +43,36 @@ impl AnthropicLlm {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
+        }
+    }
+
+    /// Renders every registered `#[tool]` into Anthropic's wire format.
+    pub fn tools() -> Vec<Tool> {
+        crate::render_tools()
+    }
+}
+
+/// Anthropic's wire format for a tool, sent in the Messages API `tools` field.
+///
+/// Anthropic names the JSON Schema `input_schema`, whereas OpenAI names it
+/// `parameters`; [`FromToolSpec`] absorbs exactly this difference so the same
+/// registered tools can serve either provider.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Tool {
+    /// The name the model uses to request the tool.
+    pub name: String,
+    /// A human-readable description that helps the model choose the tool.
+    pub description: String,
+    /// The JSON Schema describing the tool's parameters.
+    pub input_schema: serde_json::Value,
+}
+
+impl FromToolSpec for Tool {
+    fn from_tool_spec(spec: &ToolSpec) -> Self {
+        Self {
+            name: spec.name.to_string(),
+            description: spec.description.to_string(),
+            input_schema: spec.input_schema.clone(),
         }
     }
 }

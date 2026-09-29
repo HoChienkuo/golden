@@ -8,14 +8,16 @@ pub use error::{ApiErrorBody, ApiErrorDetail, Error};
 pub use llm::chat::{ChatModel, ChatStream};
 pub use llm::openai::*;
 pub use llm::{AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel};
-pub use tool::Tool;
+pub use tool::{
+    FromToolSpec, Tool, ToolDefinition, ToolSpec, registered_tools, render_tools, tool_specs,
+};
 
 #[doc(inline)]
 pub use golden_macros::tool;
 
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::tool::{ToolDefinition, into_chat_tools, registered_tools};
+    pub use crate::tool::ToolDefinition;
     pub use futures_util;
     pub use inventory;
     pub use serde_json;

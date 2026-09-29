@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::llm::openai::{ChatRequest, ChatResponse, OpenAiLlm};
+use crate::llm::openai::{ChatRequest, ChatResponse, OpenAiLlm, Tool};
 use crate::llm::{ChatModel, ChatStream};
 use async_trait::async_trait;
 
@@ -49,6 +49,14 @@ impl DeepSeekLlm {
     /// Exposes the underlying OpenAI protocol implementation.
     pub fn inner(&self) -> &OpenAiLlm {
         &self.0
+    }
+
+    /// Renders every registered `#[tool]` into DeepSeek's wire format.
+    ///
+    /// DeepSeek speaks the OpenAI protocol, so this is identical to
+    /// [`OpenAiLlm::tools`](crate::llm::openai::OpenAiLlm::tools).
+    pub fn tools() -> Vec<Tool> {
+        crate::render_tools()
     }
 }
 

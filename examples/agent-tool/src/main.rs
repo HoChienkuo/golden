@@ -1,4 +1,5 @@
 use golden_agent::tool;
+use golden_agent::{ChatModel, ChatRequest, DeepSeekLlm, DeepSeekModel, Message, Tool};
 use serde::{Deserialize, Serialize};
 
 /// Get the current weather for a city, in the given unit.
@@ -27,27 +28,66 @@ async fn place_order(order: Order) -> String {
 }
 
 #[tokio::main]
-async fn main() {
-    let tools = golden_agent::__private::into_chat_tools();
-
-    println!("registered {} tool(s):", tools.len());
-    for tool in &tools {
-        println!("  - {}", tool.function.name);
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var("DEEPSEEK_API_KEY").is_err() {
+        eprintln!("set DEEPSEEK_API_KEY to run this example");
+        return Ok(());
     }
 
-    let registered = golden_agent::__private::registered_tools();
+    let llm = DeepSeekLlm::from_env();
+    let tools = DeepSeekLlm::tools();
+    let mut messages = vec![Message::user("What's the weather in Beijing?")];
 
-    // Exercise get_weather.
-    if let Some(weather) = registered.iter().find(|t| t.name == "get_weather") {
-        let args = serde_json::json!({ "city": "Beijing", "unit": "celsius" });
-        let result = (weather.call)(args).await.unwrap();
-        println!("get_weather -> {result}");
+    // The agent loop: send the conversation, run any tools the model asks for,
+    // and repeat until it answers without requesting another tool. Today this
+    // has to live in application code, because the framework does not provide it
+    // yet. A production loop would also cap the number of rounds; this example
+    // trusts the model to stop.
+    loop {
+        let request = ChatRequest::new(DeepSeekModel::Flash.as_str())
+            .messages(messages.clone())
+            .tools(tools.clone());
+
+        let response = llm.chat(&request).await?;
+
+        let Some(message) = response
+            .choices
+            .first()
+            .map(|choice| choice.message.clone())
+        else {
+            eprintln!("(the model returned no choices)");
+            break;
+        };
+
+        let tool_calls = message.tool_calls.clone().unwrap_or_default();
+        if tool_calls.is_empty() {
+            println!("{}", message.content());
+            break;
+        }
+
+        // Record the assistant turn that requested the tools, then run each call
+        // locally and append its result as a `tool` message for the next round.
+        messages.push(Message::assistant(message.content()).tool_calls(tool_calls.clone()));
+
+        for call in &tool_calls {
+            println!("-> {}({})", call.function.name, call.function.arguments);
+            let result = call_tool(&call.function.name, &call.function.arguments).await?;
+            println!("<- {result}");
+            messages.push(Message::tool(call.id.clone(), result));
+        }
     }
 
-    // Exercise place_order with a structured argument.
-    if let Some(order) = registered.iter().find(|t| t.name == "place_order") {
-        let args = serde_json::json!({ "order": { "item": "coffee", "quantity": 2 } });
-        let result = (order.call)(args).await.unwrap();
-        println!("place_order -> {result}");
-    }
+    Ok(())
+}
+
+/// Looks up a registered `#[tool]` by name and invokes it with the model's
+/// JSON arguments, returning its JSON-encoded result.
+async fn call_tool(name: &str, arguments: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let tool = golden_agent::registered_tools()
+        .into_iter()
+        .find(|tool| tool.name == name)
+        .ok_or_else(|| format!("unknown tool `{name}`"))?;
+
+    let arguments: serde_json::Value = serde_json::from_str(arguments)?;
+    Ok(tool.call(arguments).await?)
 }

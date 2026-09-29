@@ -1,53 +1,100 @@
-use async_trait::async_trait;
+use std::borrow::Cow;
+
 use futures_util::future::BoxFuture;
 use serde_json::Value;
 
 use crate::error::Error;
 
-/// A callable function exposed to a language model as a tool.
+/// A provider-neutral description of a tool exposed to a language model.
 ///
-/// Tools are normally declared with the [`#[tool]`](macro@crate::tool)
-/// attribute macro, which derives the name, description and JSON Schema from
-/// the function signature and doc comment. They can also be implemented
-/// manually for full control.
-#[async_trait]
-pub trait Tool: Send + Sync {
-    /// The name of the tool, used by the model to request it.
-    fn name(&self) -> &str;
-
-    /// A human-readable description that helps the model choose when to call
-    /// this tool.
-    fn description(&self) -> &str;
-
+/// This is the common currency between the `#[tool]` registry and each
+/// provider's wire format. A provider converts it into its own tool type by
+/// implementing [`FromToolSpec`], which is how the same registered tools can be
+/// rendered for OpenAI, Anthropic or any other backend.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolSpec {
+    /// The name the model uses to request the tool.
+    pub name: Cow<'static, str>,
+    /// A human-readable description that helps the model choose the tool.
+    pub description: Cow<'static, str>,
     /// The JSON Schema describing the tool's parameters.
-    fn schema(&self) -> Value;
+    pub input_schema: Value,
+}
+
+impl ToolSpec {
+    /// Builds a spec from a name, a description and its JSON Schema.
+    pub fn new(
+        name: impl Into<Cow<'static, str>>,
+        description: impl Into<Cow<'static, str>>,
+        input_schema: Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            input_schema,
+        }
+    }
+}
+
+/// A callable tool exposed to a language model.
+///
+/// Tools are normally declared with the [`#[tool]`](macro@crate::tool) attribute,
+/// which registers a [`ToolDefinition`] implementing this trait. Implement it
+/// directly for full control, such as carrying shared state.
+pub trait Tool: Send + Sync {
+    /// The provider-neutral description of this tool.
+    fn spec(&self) -> ToolSpec;
 
     /// Invokes the tool with the model-provided JSON arguments and returns the
     /// JSON-encoded result.
-    async fn call(&self, args: Value) -> Result<String, Error>;
+    fn call(&self, args: Value) -> BoxFuture<'static, Result<String, Error>>;
 }
 
-/// A statically registered tool, collected through the inventory crate by the
+/// A provider's wire-format tool, built from a neutral [`ToolSpec`].
+///
+/// Every provider implements this for its own tool type — for example
+/// [`openai::Tool`](crate::llm::openai::Tool) and
+/// [`anthropic::Tool`](crate::llm::anthropic::Tool) — so that a single set of
+/// registered tools can be rendered into any provider's request.
+pub trait FromToolSpec: Sized {
+    /// Builds the provider representation from a neutral spec.
+    fn from_tool_spec(spec: &ToolSpec) -> Self;
+}
+
+/// A statically registered tool, collected through the `inventory` crate by the
 /// [`#[tool]`](macro@crate::tool) attribute macro.
 ///
-/// This mirrors `golden-boot`'s `RouteDefinition` mechanism. The [`call`]
-/// function deserializes the model-provided arguments, invokes the underlying
-/// async function, and returns the serialized result wrapped in a boxed
-/// future.
-///
-/// [`call`]: ToolDefinition::call
+/// The function-pointer fields let the macro register a plain `async fn` without
+/// instantiating a value; prefer the [`Tool`] trait when invoking it.
 #[doc(hidden)]
 pub struct ToolDefinition {
+    /// The tool name, used by the model to request it.
     pub name: &'static str,
+    /// A human-readable description of the tool.
     pub description: &'static str,
+    /// Builds the JSON Schema describing the tool's parameters.
     pub schema: fn() -> Value,
+    /// Deserializes the arguments, invokes the function and serializes the result.
     pub call: fn(Value) -> BoxFuture<'static, Result<String, Error>>,
+}
+
+impl Tool for ToolDefinition {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: Cow::Borrowed(self.name),
+            description: Cow::Borrowed(self.description),
+            input_schema: (self.schema)(),
+        }
+    }
+
+    fn call(&self, args: Value) -> BoxFuture<'static, Result<String, Error>> {
+        (self.call)(args)
+    }
 }
 
 inventory::collect!(ToolDefinition);
 
 /// Returns every statically registered tool, sorted by name.
-#[doc(hidden)]
 pub fn registered_tools() -> Vec<&'static ToolDefinition> {
     let mut tools = inventory::iter::<ToolDefinition>
         .into_iter()
@@ -56,18 +103,25 @@ pub fn registered_tools() -> Vec<&'static ToolDefinition> {
     tools
 }
 
-/// Converts every statically registered tool into an OpenAI function tool,
-/// ready to be attached to a [`ChatRequest`](crate::llm::openai::ChatRequest).
-#[doc(hidden)]
-pub fn into_chat_tools() -> Vec<crate::llm::openai::Tool> {
+/// Returns the neutral [`ToolSpec`] of every registered tool, sorted by name.
+pub fn tool_specs() -> Vec<ToolSpec> {
     registered_tools()
         .into_iter()
-        .map(|tool| {
-            crate::llm::openai::Tool::function(
-                tool.name,
-                Some(tool.description.to_string()),
-                Some((tool.schema)()),
-            )
-        })
+        .map(|tool| tool.spec())
         .collect()
+}
+
+/// Renders every registered tool into a provider's wire format.
+///
+/// The provider type is inferred from the binding, so the same call renders the
+/// tools for any provider implementing [`FromToolSpec`]:
+///
+/// ```
+/// use golden_agent::llm::{anthropic, openai};
+///
+/// let openai_tools: Vec<openai::Tool> = golden_agent::render_tools();
+/// let anthropic_tools: Vec<anthropic::Tool> = golden_agent::render_tools();
+/// ```
+pub fn render_tools<T: FromToolSpec>() -> Vec<T> {
+    tool_specs().iter().map(T::from_tool_spec).collect()
 }
