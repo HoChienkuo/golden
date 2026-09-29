@@ -1,8 +1,8 @@
 # Golden
 
-一个构建于 [Axum](https://github.com/tokio-rs/axum) 之上的、注解驱动的 Web 框架。
+一个面向 Rust 的、注解驱动的 **Web 与 Agent 框架**。
 
-Golden 提供了简洁的应用入口，并把运行时、路由以及 HTTP 服务器的装配细节从应用代码中剥离出去。
+Golden 让你用带注解的 `async fn` 声明 HTTP 处理器与 LLM 工具；过程宏把它们静态注册，运行时负责装配。
 
 [English Docs](README.md)
 
@@ -10,21 +10,22 @@ Golden 提供了简洁的应用入口，并把运行时、路由以及 HTTP 服�
 
 | Crate | 说明 |
 | --- | --- |
-| [`golden-boot`](./golden-boot) | 面向用户的框架：映射注解、`#[golden_boot_application]` 入口、`RequestEntity` 以及响应助手。 |
-| [`golden-kernel`](./golden-kernel) | 核心运行时：路由、应用状态、请求实体与响应助手。 |
-| [`golden-macros`](./golden-macros) | GoldenBoot 背后的过程宏。 |
+| [`golden-boot`](./golden-boot) | 面向用户的 Web 框架：映射注解、`#[golden_boot_application]` 入口、`RequestEntity` 以及响应助手。 |
+| [`golden-kernel`](./golden-kernel) | Web 核心运行时：路由、应用状态、请求实体与响应助手。 |
+| [`golden-macros`](./golden-macros) | GoldenBoot 与 GoldenAgent 背后的过程宏。 |
+| [`golden-agent`](./golden-agent) | Agent 框架：`#[tool]` 声明、按 provider 渲染工具，以及聊天模型（OpenAI、DeepSeek、Anthropic）。 |
 
 ## 快速开始
 
-在 `Cargo.toml` 中添加 `golden-boot`：
+### Web
+
+添加 `golden-boot`，标注一个 `async fn main`：
 
 ```toml
 [dependencies]
 golden-boot = "0.1"
 serde = { version = "1", features = ["derive"] }
 ```
-
-然后标注一个 `async fn main`：
 
 ```rust
 use golden_boot::golden_boot_application;
@@ -35,16 +36,34 @@ async fn main() {
 }
 ```
 
-运行后，服务默认监听 `http://0.0.0.0:8080`。
+服务默认监听 `http://0.0.0.0:8080`。关于路由、请求实体、应用状态与响应助手，请参阅 [golden-boot README](./golden-boot/README.md)。
 
-关于路由、请求实体、应用状态以及响应助手的更多内容，请参阅 [golden-boot README](./golden-boot/README.md)。
+### Agent
+
+添加 `golden-agent`，用 `#[tool]` 标注工具：
+
+```toml
+[dependencies]
+golden-agent = "0.1"
+```
+
+```rust
+use golden_agent::tool;
+
+/// Get the current weather for a city.
+#[tool]
+async fn get_weather(city: String) -> String {
+    format!("{city}: 20°C")
+}
+```
+
+关于调用聊天模型与路线图，请参阅 [golden-agent README](./golden-agent/README.md)。
 
 ## 示例
 
-`examples/` 目录包含可运行的演示：
-
-- [`hello-world`](./examples/hello-world) — 一个最小的 GoldenBoot 应用。
-- [`article-server`](./examples/article-server) — 一个基于 SQLite 的文章 CRUD 服务。
+- [`examples/hello-world`](./examples/hello-world) — 一个最小的 GoldenBoot 应用。
+- [`examples/article-server`](./examples/article-server) — 一个基于 SQLite 的文章 CRUD 服务。
+- [`golden-agent/examples`](./golden-agent/examples) — 工具调用、聊天补全与流式。
 
 ## 许可证
 

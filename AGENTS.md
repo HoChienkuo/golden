@@ -40,16 +40,15 @@ golden-macros (compile time)  ->  golden-kernel / golden-agent (runtime)  ->  go
 | --- | --- |
 | `examples/hello-world` | Minimal GoldenBoot app |
 | `examples/article-server` | SQLite-backed article CRUD via `sqlx` 0.9 |
-| `examples/agent-tool` | `#[tool]` registration plus a full tool-calling loop against DeepSeek (needs `DEEPSEEK_API_KEY` and network access) |
 
 ## Setup & Development
 
 - Install a Rust toolchain with 2024-edition support (Rust 1.85+), then build with
   `cargo build --workspace`.
-- Run an example with `cargo run -p hello-world` (or `-p article-server`, `-p agent-tool`); see
+- Run an example with `cargo run -p hello-world` (or `-p article-server`); see
   `examples/article-server/README.md` for SQLite setup and `oha` stress-test instructions.
-  `agent-tool` and `golden-agent`'s own chat examples additionally need `DEEPSEEK_API_KEY` and
-  network access.
+- `golden-agent`'s examples (`tools`, `chat_completion`, `chat_stream`) additionally need
+  `DEEPSEEK_API_KEY` and network access.
 - Add shared dependencies to the root `[workspace.dependencies]` and reference them in crate
   manifests with `dep.workspace = true`.
 - Do not commit changes unless explicitly asked. Do not bump versions or hand-edit `Cargo.lock`.

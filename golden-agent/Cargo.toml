@@ -28,3 +28,7 @@ path = "examples/chat_completion.rs"
 [[example]]
 name = "chat_stream"
 path = "examples/chat_stream.rs"
+
+[[example]]
+name = "tools"
+path = "examples/tools.rs"

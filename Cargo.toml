@@ -3,7 +3,6 @@ resolver = "3"
 members = [
     "examples/hello-world",
     "examples/article-server",
-    "examples/agent-tool",
     "golden-boot",
     "golden-kernel",
     "golden-macros",

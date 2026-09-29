@@ -3,16 +3,6 @@
 version = 4
 
 [[package]]
-name = "agent-tool"
-version = "0.1.11"
-dependencies = [
- "golden-agent",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

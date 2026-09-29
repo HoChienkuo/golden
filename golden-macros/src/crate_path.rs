@@ -21,10 +21,14 @@ pub fn golden_boot() -> syn::Result<TokenStream> {
 
 pub fn golden_agent() -> syn::Result<TokenStream> {
     match crate_name("golden-agent") {
-        Ok(FoundCrate::Itself) => Ok(quote!(crate)),
+        // A bare `crate` would break in this crate's own examples and tests,
+        // which are separate crates. `::golden_agent` resolves everywhere: the
+        // lib aliases itself with `extern crate self as golden_agent`, and
+        // examples/tests see the lib as an extern crate.
+        Ok(FoundCrate::Itself) => Ok(quote!(::golden_agent)),
 
         Ok(FoundCrate::Name(name)) => {
-            let identifier = format_ident!("{}", name.replace('-', "_"),);
+            let identifier = format_ident!("{}", name.replace('-', "_"));
 
             Ok(quote!(::#identifier))
         }
