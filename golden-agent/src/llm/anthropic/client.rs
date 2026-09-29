@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use crate::error::{ApiErrorBody, Error};
 use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream};
+use crate::llm::http::{self, HttpConfig};
 
 use super::response::MessagesResponse;
 use super::translate;
@@ -27,15 +28,18 @@ pub struct AnthropicLlm {
     http: reqwest::Client,
     api_key: String,
     base_url: String,
+    config: HttpConfig,
 }
 
 impl AnthropicLlm {
     /// Constructs a client with an explicit API key.
     pub fn new(api_key: impl Into<String>) -> Self {
+        let config = HttpConfig::default();
         Self {
-            http: reqwest::Client::new(),
+            http: config.build_client(),
             api_key: api_key.into(),
             base_url: BASE_URL.to_string(),
+            config,
         }
     }
 
@@ -43,6 +47,13 @@ impl AnthropicLlm {
     pub fn from_env() -> Self {
         let key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
         Self::new(key)
+    }
+
+    /// Replaces the HTTP reliability settings, rebuilding the underlying client.
+    pub fn with_http_config(mut self, config: HttpConfig) -> Self {
+        self.http = config.build_client();
+        self.config = config;
+        self
     }
 
     /// Returns the Messages API endpoint.
@@ -56,23 +67,29 @@ impl ChatModel for AnthropicLlm {
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
         let body = translate::build_request(request, false, DEFAULT_MAX_TOKENS);
 
-        let response = self
-            .http
-            .post(self.endpoint())
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", API_VERSION)
-            .json(&body)
-            .send()
-            .await?;
+        http::with_retry(&self.config, || async {
+            let mut builder = self
+                .http
+                .post(self.endpoint())
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", API_VERSION)
+                .json(&body);
+            if let Some(timeout) = self.config.timeout {
+                builder = builder.timeout(timeout);
+            }
 
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.json::<ApiErrorBody>().await.ok();
-            return Err(Error::api(status, body));
-        }
+            let response = builder.send().await?;
 
-        let response = response.json::<MessagesResponse>().await?;
-        Ok(translate::into_chat_response(response))
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.json::<ApiErrorBody>().await.ok();
+                return Err(Error::api(status, body));
+            }
+
+            let response = response.json::<MessagesResponse>().await?;
+            Ok(translate::into_chat_response(response))
+        })
+        .await
     }
 
     fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
@@ -81,29 +98,34 @@ impl ChatModel for AnthropicLlm {
         let http = self.http.clone();
         let api_key = self.api_key.clone();
         let url = self.endpoint();
+        let config = self.config.clone();
 
         Box::pin(async_stream::stream! {
-            let response = match http
-                .post(&url)
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", API_VERSION)
-                .json(&body)
-                .send()
-                .await
+            let response = match http::with_retry(&config, || async {
+                let response = http
+                    .post(&url)
+                    .header("x-api-key", &api_key)
+                    .header("anthropic-version", API_VERSION)
+                    .json(&body)
+                    .send()
+                    .await?;
+
+                let status = response.status();
+                if !status.is_success() {
+                    let body = response.json::<ApiErrorBody>().await.ok();
+                    return Err(Error::api(status, body));
+                }
+
+                Ok(response)
+            })
+            .await
             {
                 Ok(response) => response,
                 Err(error) => {
-                    yield Err(Error::Request(error));
+                    yield Err(error);
                     return;
                 }
             };
-
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.json::<ApiErrorBody>().await.ok();
-                yield Err(Error::api(status, body));
-                return;
-            }
 
             let mut events = AnthropicSseStream {
                 inner: response.bytes_stream(),

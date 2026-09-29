@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream};
+use crate::llm::http::HttpConfig;
 use crate::llm::openai::OpenAiLlm;
 use async_trait::async_trait;
 
@@ -39,6 +40,11 @@ impl DeepSeekLlm {
     /// Constructs with an explicit API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self(OpenAiLlm::new(Self::BASE_URL, api_key))
+    }
+
+    /// Replaces the HTTP reliability settings, rebuilding the underlying client.
+    pub fn with_http_config(self, config: HttpConfig) -> Self {
+        Self(self.0.with_http_config(config))
     }
 
     /// Exposes the underlying OpenAI protocol implementation.

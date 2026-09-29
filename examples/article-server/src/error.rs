@@ -1,10 +1,5 @@
 use golden_boot::{
-    ApiResponse,
-    IntoResponse,
-    PaginationError,
-    RequestEntityError,
-    Response,
-    ResponseEntity,
+    ApiResponse, IntoResponse, PaginationError, RequestEntityError, Response, ResponseEntity,
     StatusCode,
 };
 
@@ -35,23 +30,14 @@ pub enum ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
-            Self::Request(_) | Self::Pagination(_) => {
-                (StatusCode::BAD_REQUEST, 40000)
-            }
+            Self::Request(_) | Self::Pagination(_) => (StatusCode::BAD_REQUEST, 40000),
 
-            Self::ArticleNotFound(_) => {
-                (StatusCode::NOT_FOUND, 40400)
-            }
+            Self::ArticleNotFound(_) => (StatusCode::NOT_FOUND, 40400),
 
-            Self::Database(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, 50000)
-            }
+            Self::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, 50000),
         };
 
-        ResponseEntity::new(
-            status,
-            ApiResponse::<()>::error(code, self.to_string()),
-        )
+        ResponseEntity::new(status, ApiResponse::<()>::error(code, self.to_string()))
             .into_response()
     }
 }

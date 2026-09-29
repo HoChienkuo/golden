@@ -14,7 +14,9 @@ pub use llm::chat::{
     ChatModel, ChatRequest, ChatResponse, ChatStream, Content, ContentPart, FinishReason, Message,
     Role, ToolCall, ToolChoice, Usage,
 };
-pub use llm::{AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, OpenAiLlm, OpenAiModel};
+pub use llm::{
+    AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, HttpConfig, OpenAiLlm, OpenAiModel,
+};
 pub use tool::{
     FromToolSpec, Tool, ToolDefinition, ToolSpec, registered_tools, render_tools, tool_specs,
 };

@@ -30,6 +30,7 @@ tokio = {
         "macros",
         "net",
         "signal",
+        "time",
     ]
 }
 proc-macro2 = "1"

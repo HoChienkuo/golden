@@ -5,6 +5,7 @@ use futures_util::StreamExt;
 
 use crate::error::{ApiErrorBody, Error};
 use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream};
+use crate::llm::http::{self, HttpConfig};
 
 use super::translate;
 
@@ -17,21 +18,31 @@ pub struct OpenAiLlm {
     http: reqwest::Client,
     api_key: String,
     base_url: String,
+    config: HttpConfig,
 }
 
 impl OpenAiLlm {
     /// Constructs a client from a base URL and API key (no provider defaults).
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
+        let config = HttpConfig::default();
         Self {
-            http: reqwest::Client::new(),
+            http: config.build_client(),
             api_key: api_key.into(),
             base_url: base_url.into(),
+            config,
         }
     }
 
     /// Constructs a client pointed at the official OpenAI endpoint.
     pub fn openai_default(api_key: impl Into<String>) -> Self {
         Self::new("https://api.openai.com/v1", api_key)
+    }
+
+    /// Replaces the HTTP reliability settings, rebuilding the underlying client.
+    pub fn with_http_config(mut self, config: HttpConfig) -> Self {
+        self.http = config.build_client();
+        self.config = config;
+        self
     }
 
     /// Returns the current base URL.
@@ -49,22 +60,28 @@ impl ChatModel for OpenAiLlm {
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
         let body = translate::to_wire_request(request, false);
 
-        let response = self
-            .http
-            .post(self.endpoint("/chat/completions"))
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await?;
+        http::with_retry(&self.config, || async {
+            let mut builder = self
+                .http
+                .post(self.endpoint("/chat/completions"))
+                .bearer_auth(&self.api_key)
+                .json(&body);
+            if let Some(timeout) = self.config.timeout {
+                builder = builder.timeout(timeout);
+            }
 
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.json::<ApiErrorBody>().await.ok();
-            return Err(Error::api(status, body));
-        }
+            let response = builder.send().await?;
 
-        let response = response.json::<super::response::ChatResponse>().await?;
-        Ok(translate::from_wire_response(response))
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.json::<ApiErrorBody>().await.ok();
+                return Err(Error::api(status, body));
+            }
+
+            let response = response.json::<super::response::ChatResponse>().await?;
+            Ok(translate::from_wire_response(response))
+        })
+        .await
     }
 
     fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
@@ -73,25 +90,30 @@ impl ChatModel for OpenAiLlm {
         let http = self.http.clone();
         let api_key = self.api_key.clone();
         let url = self.endpoint("/chat/completions");
+        let config = self.config.clone();
 
         Box::pin(async_stream::stream! {
-            let response = match http
-                .post(&url)
-                .bearer_auth(&api_key)
-                .json(&body)
-                .send()
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => { yield Err(Error::Request(e)); return; }
-            };
+            let response = match http::with_retry(&config, || async {
+                let response = http
+                    .post(&url)
+                    .bearer_auth(&api_key)
+                    .json(&body)
+                    .send()
+                    .await?;
 
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.json::<ApiErrorBody>().await.ok();
-                yield Err(Error::api(status, body));
-                return;
-            }
+                let status = response.status();
+                if !status.is_success() {
+                    let body = response.json::<ApiErrorBody>().await.ok();
+                    return Err(Error::api(status, body));
+                }
+
+                Ok(response)
+            })
+            .await
+            {
+                Ok(response) => response,
+                Err(error) => { yield Err(error); return; }
+            };
 
             let inner = response.bytes_stream();
             let mut line_stream = SseLineStream {
