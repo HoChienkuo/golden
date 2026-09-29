@@ -2,6 +2,7 @@
 
 mod middleware;
 mod result;
+mod retry;
 mod state;
 mod tools;
 
@@ -16,6 +17,7 @@ use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Message, ToolCall};
 
 pub use middleware::{Middleware, ModelHandler, ToolHandler};
 pub use result::AgentResult;
+pub use retry::Retry;
 pub use state::AgentState;
 pub use tools::ToolSet;
 

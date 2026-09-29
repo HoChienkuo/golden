@@ -9,7 +9,7 @@ use crate::error::{ApiErrorBody, Error};
 use crate::llm::chat::{
     ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, PartialToolCall,
 };
-use crate::llm::http::{self, HttpConfig};
+use crate::llm::http::HttpConfig;
 
 use super::translate;
 
@@ -64,28 +64,25 @@ impl ChatModel for OpenAiLlm {
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
         let body = translate::to_wire_request(request, false);
 
-        http::with_retry(&self.config, || async {
-            let mut builder = self
-                .http
-                .post(self.endpoint("/chat/completions"))
-                .bearer_auth(&self.api_key)
-                .json(&body);
-            if let Some(timeout) = self.config.timeout {
-                builder = builder.timeout(timeout);
-            }
+        let response = self
+            .config
+            .bound(
+                self.http
+                    .post(self.endpoint("/chat/completions"))
+                    .bearer_auth(&self.api_key)
+                    .json(&body),
+            )
+            .send()
+            .await?;
 
-            let response = builder.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.json::<ApiErrorBody>().await.ok();
+            return Err(Error::api(status, body));
+        }
 
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.json::<ApiErrorBody>().await.ok();
-                return Err(Error::api(status, body));
-            }
-
-            let response = response.json::<super::response::ChatResponse>().await?;
-            Ok(translate::from_wire_response(response))
-        })
-        .await
+        let response = response.json::<super::response::ChatResponse>().await?;
+        Ok(translate::from_wire_response(response))
     }
 
     fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
@@ -94,30 +91,25 @@ impl ChatModel for OpenAiLlm {
         let http = self.http.clone();
         let api_key = self.api_key.clone();
         let url = self.endpoint("/chat/completions");
-        let config = self.config.clone();
 
         Box::pin(async_stream::stream! {
-            let response = match http::with_retry(&config, || async {
-                let response = http
-                    .post(&url)
-                    .bearer_auth(&api_key)
-                    .json(&body)
-                    .send()
-                    .await?;
-
-                let status = response.status();
-                if !status.is_success() {
-                    let body = response.json::<ApiErrorBody>().await.ok();
-                    return Err(Error::api(status, body));
-                }
-
-                Ok(response)
-            })
-            .await
+            let response = match http
+                .post(&url)
+                .bearer_auth(&api_key)
+                .json(&body)
+                .send()
+                .await
             {
                 Ok(response) => response,
-                Err(error) => { yield Err(error); return; }
+                Err(error) => { yield Err(Error::Request(error)); return; }
             };
+
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.json::<ApiErrorBody>().await.ok();
+                yield Err(Error::api(status, body));
+                return;
+            }
 
             let inner = response.bytes_stream();
             let mut line_stream = SseLineStream {

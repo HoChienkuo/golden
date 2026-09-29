@@ -10,7 +10,7 @@ use crate::error::{ApiErrorBody, Error};
 use crate::llm::chat::{
     ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, PartialToolCall,
 };
-use crate::llm::http::{self, HttpConfig};
+use crate::llm::http::HttpConfig;
 
 use super::response::MessagesResponse;
 use super::translate;
@@ -71,29 +71,26 @@ impl ChatModel for AnthropicLlm {
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
         let body = translate::build_request(request, false, DEFAULT_MAX_TOKENS);
 
-        http::with_retry(&self.config, || async {
-            let mut builder = self
-                .http
-                .post(self.endpoint())
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-version", API_VERSION)
-                .json(&body);
-            if let Some(timeout) = self.config.timeout {
-                builder = builder.timeout(timeout);
-            }
+        let response = self
+            .config
+            .bound(
+                self.http
+                    .post(self.endpoint())
+                    .header("x-api-key", &self.api_key)
+                    .header("anthropic-version", API_VERSION)
+                    .json(&body),
+            )
+            .send()
+            .await?;
 
-            let response = builder.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.json::<ApiErrorBody>().await.ok();
+            return Err(Error::api(status, body));
+        }
 
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.json::<ApiErrorBody>().await.ok();
-                return Err(Error::api(status, body));
-            }
-
-            let response = response.json::<MessagesResponse>().await?;
-            Ok(translate::into_chat_response(response))
-        })
-        .await
+        let response = response.json::<MessagesResponse>().await?;
+        Ok(translate::into_chat_response(response))
     }
 
     fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
@@ -102,34 +99,29 @@ impl ChatModel for AnthropicLlm {
         let http = self.http.clone();
         let api_key = self.api_key.clone();
         let url = self.endpoint();
-        let config = self.config.clone();
 
         Box::pin(async_stream::stream! {
-            let response = match http::with_retry(&config, || async {
-                let response = http
-                    .post(&url)
-                    .header("x-api-key", &api_key)
-                    .header("anthropic-version", API_VERSION)
-                    .json(&body)
-                    .send()
-                    .await?;
-
-                let status = response.status();
-                if !status.is_success() {
-                    let body = response.json::<ApiErrorBody>().await.ok();
-                    return Err(Error::api(status, body));
-                }
-
-                Ok(response)
-            })
-            .await
+            let response = match http
+                .post(&url)
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", API_VERSION)
+                .json(&body)
+                .send()
+                .await
             {
                 Ok(response) => response,
                 Err(error) => {
-                    yield Err(error);
+                    yield Err(Error::Request(error));
                     return;
                 }
             };
+
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.json::<ApiErrorBody>().await.ok();
+                yield Err(Error::api(status, body));
+                return;
+            }
 
             let mut events = AnthropicSseStream {
                 inner: response.bytes_stream(),
