@@ -15,7 +15,7 @@ use crate::tool::{Tool, ToolSpec, registered_tools};
 /// use golden_agent::ToolSet;
 ///
 /// // Narrow the registered tools down to a subset, by their wire names.
-/// let tools = ToolSet::registered().only(["get_weather", "calculate"])?;
+/// let tools = ToolSet::registered()?.only(["get_weather", "calculate"])?;
 /// # Ok::<(), golden_agent::Error>(())
 /// ```
 #[derive(Clone, Default)]
@@ -31,14 +31,18 @@ impl ToolSet {
 
     /// Collects every tool registered with [`#[tool]`](macro@crate::tool).
     ///
-    /// When two tools share a registered name, the last one collected wins.
-    pub fn registered() -> Self {
+    /// Fails with [`Error::DuplicateTool`] if two registered tools share a name,
+    /// so a collision surfaces at startup instead of silently dropping a tool.
+    pub fn registered() -> Result<Self, Error> {
         let mut set = Self::new();
         for definition in registered_tools() {
-            set.tools
-                .insert(definition.name.to_string(), Arc::new(definition));
+            let name = definition.name.to_string();
+            if set.tools.contains_key(&name) {
+                return Err(Error::DuplicateTool { name });
+            }
+            set.tools.insert(name, Arc::new(definition));
         }
-        set
+        Ok(set)
     }
 
     /// Keeps only the tools with the given registered names.

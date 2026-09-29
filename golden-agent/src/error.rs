@@ -31,6 +31,13 @@ pub enum Error {
         name: String,
     },
 
+    /// Two registered tools share the same name.
+    #[error("duplicate tool name: {name}")]
+    DuplicateTool {
+        /// The duplicated tool name.
+        name: String,
+    },
+
     /// A tool could not be executed.
     #[error("tool `{name}` failed: {message}")]
     Tool {

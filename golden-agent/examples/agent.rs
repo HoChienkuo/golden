@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let agent = Agent::builder()
         .model(DeepSeekLlm::from_env())
         .request(ChatRequest::new(DeepSeekModel::Flash.as_str()))
-        .tools(ToolSet::registered())
+        .tools(ToolSet::registered()?)
         .system_prompt("You answer concisely and call tools when needed.")
         .middleware(Retry::new())
         .max_steps(8)
