@@ -38,11 +38,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tools = golden_agent::tool_specs();
     let mut messages = vec![Message::user("What's the weather in Beijing?")];
 
-    // The agent loop: send the conversation, run any tools the model asks for,
-    // and repeat until it answers without requesting another tool. Today this
-    // has to live in application code, because the framework does not provide it
-    // yet. A production loop would also cap the number of rounds; this example
-    // trusts the model to stop.
+    // A hand-rolled ReAct loop: send the conversation, run any tools the model
+    // asks for, and repeat until it answers without requesting another tool.
+    // `examples/agent.rs` runs the same loop through `Agent`, which also caps the
+    // number of rounds; this example shows what that loop expands to.
     loop {
         let request = ChatRequest::new(DeepSeekModel::Flash.as_str())
             .messages(messages.clone())

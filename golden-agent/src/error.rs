@@ -2,6 +2,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 /// The error type for golden-agent.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum Error {
     /// An HTTP transport error.
@@ -22,6 +23,36 @@ pub enum Error {
     /// A streaming response parsing error.
     #[error("invalid sse data: {0}")]
     Stream(String),
+
+    /// A tool call named a tool that is not available to the agent.
+    #[error("unknown tool: {name}")]
+    UnknownTool {
+        /// The requested tool name.
+        name: String,
+    },
+
+    /// A tool could not be executed.
+    #[error("tool `{name}` failed: {message}")]
+    Tool {
+        /// The tool name.
+        name: String,
+        /// A description of the failure.
+        message: String,
+    },
+
+    /// The agent reached its step limit without finishing.
+    #[error("agent reached the maximum of {steps} steps")]
+    MaxStepsExceeded {
+        /// The configured step limit.
+        steps: usize,
+    },
+
+    /// The agent was built without a required setting.
+    #[error("agent is missing a required setting: `{name}`")]
+    MissingSetting {
+        /// The missing setting name.
+        name: &'static str,
+    },
 }
 
 /// The OpenAI-style error response body.

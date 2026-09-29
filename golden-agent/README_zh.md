@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [ ] Ollama
 - [ ] 字符串模板 / prompt 模板
 - [ ] 会话历史与上下文管理
-- [ ] 自动工具调用循环（Agent）
+- [x] 自动工具调用循环（Agent）
 - [ ] 有状态工具
 - [ ] MCP 工具接入
 - [ ] Web 端点（HTTP / SSE）

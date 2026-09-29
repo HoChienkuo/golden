@@ -5,10 +5,15 @@
 // them working when the macro is used inside this crate itself.
 extern crate self as golden_agent;
 
+pub mod agent;
 mod error;
 pub mod llm;
 pub mod tool;
 
+pub use agent::{
+    Agent, AgentBuilder, AgentConfig, AgentResult, AgentState, Middleware, ModelHandler,
+    ToolHandler, ToolSet,
+};
 pub use error::{ApiErrorBody, ApiErrorDetail, Error};
 pub use llm::chat::{
     ChatModel, ChatRequest, ChatResponse, ChatStream, Content, ContentPart, FinishReason, Message,

@@ -58,7 +58,7 @@ streaming — live in
 - [ ] Ollama
 - [ ] String / prompt templates
 - [ ] Conversation history and context management
-- [ ] Automatic tool-calling loop (agents)
+- [x] Automatic tool-calling loop (agents)
 - [ ] Stateful tools
 - [ ] MCP tool sources
 - [ ] Web endpoints (HTTP / SSE)

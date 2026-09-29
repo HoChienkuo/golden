@@ -13,7 +13,7 @@ Golden 让你用带注解的 `async fn` 声明 HTTP 处理器与 LLM 工具；�
 | [`golden-boot`](./golden-boot) | 面向用户的 Web 框架：映射注解、`#[golden_boot_application]` 入口、`RequestEntity` 以及响应助手。 |
 | [`golden-kernel`](./golden-kernel) | Web 核心运行时：路由、应用状态、请求实体与响应助手。 |
 | [`golden-macros`](./golden-macros) | GoldenBoot 与 GoldenAgent 背后的过程宏。 |
-| [`golden-agent`](./golden-agent) | Agent 框架：`#[tool]` 声明、按 provider 渲染工具，以及聊天模型（OpenAI、DeepSeek、Anthropic）。 |
+| [`golden-agent`](./golden-agent) | Agent 框架：`#[tool]` 声明、ReAct Agent 循环，以及聊天模型（OpenAI、DeepSeek、Anthropic）。 |
 
 ## 快速开始
 
@@ -63,7 +63,7 @@ async fn get_weather(city: String) -> String {
 
 - [`examples/hello-world`](./examples/hello-world) — 一个最小的 GoldenBoot 应用。
 - [`examples/article-server`](./examples/article-server) — 一个基于 SQLite 的文章 CRUD 服务。
-- [`golden-agent/examples`](./golden-agent/examples) — 工具调用、聊天补全与流式。
+- [`golden-agent/examples`](./golden-agent/examples) — Agent 循环、手工工具循环、聊天补全与流式。
 
 ## 许可证
 

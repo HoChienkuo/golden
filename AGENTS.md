@@ -19,9 +19,10 @@ golden-macros (compile time)  ->  golden-kernel / golden-agent (runtime)  ->  go
 
 - Macros emit `inventory::submit!` entries of `RouteDefinition` (web) or `ToolDefinition` (agent).
 - The kernel collects them via `inventory::iter`, validates them, and assembles an Axum `Router`.
-- `golden-agent` collects `ToolDefinition` entries the same way and renders them per provider; it
-  does not run an agent loop, so application code drives the request -> tool-call -> execute ->
-  feed-back cycle.
+- `golden-agent` collects `ToolDefinition` entries the same way, renders them per provider, and runs
+  a ReAct loop (`Agent`): it calls the model, executes the requested tools, feeds the results back,
+  and repeats until the model stops calling tools or `max_steps` is reached. `ToolSet` selects tools
+  by wire name and `Middleware` hooks wrap each run, model call, and tool call.
 - `#[golden_boot_application]` rewrites `async fn main` into a runtime bootstrap call (`run` / `run_fallible`).
 - `golden-boot` only re-exports; it does not implement behavior.
 
@@ -32,7 +33,7 @@ golden-macros (compile time)  ->  golden-kernel / golden-agent (runtime)  ->  go
 | `golden-kernel` (lib name `golden_core`) | Tokio runtime bootstrap + graceful shutdown, `inventory` route discovery, router assembly, duplicate-route and state-type validation, `RequestEntity`, response helpers (`ApiResponse`, `ResponseEntity`, `Page`), error types, and Axum re-exports (`web`, `header`, `multipart`, `sse`, `__private`) |
 | `golden-macros` | `proc-macro = true`; `#[golden_boot_application]`, HTTP mapping attributes, `#[derive(RequestEntity)]`, `#[tool]`; features `web`, `agent`, `all` (default) |
 | `golden-boot` | User-facing facade re-exporting kernel + macros; the usual dependency for applications |
-| `golden-agent` | `#[tool]` registration via `inventory` (`ToolDefinition`); a provider-neutral tool model (`ToolSpec`, `Tool`, `FromToolSpec`, `registered_tools` / `tool_specs` / `render_tools`); and a provider-neutral `ChatModel` / `ChatStream` (`ChatRequest`, `ChatResponse`, `Message`, `ToolSpec`-based tools) with OpenAI, DeepSeek and Anthropic providers, each translating to its own wire format |
+| `golden-agent` | `#[tool]` registration via `inventory` (`ToolDefinition`, `registered_tools` / `tool_specs` / `render_tools`); a provider-neutral tool model (`ToolSpec`, `Tool`, `FromToolSpec`, `ToolSet`); a provider-neutral `ChatModel` / `ChatStream` (`ChatRequest`, `ChatResponse`, `Message`) with OpenAI, DeepSeek and Anthropic providers, each translating to its own wire format; `HttpConfig` (request timeouts and automatic retries); and a ReAct loop (`Agent`, `AgentBuilder`, `AgentState`, `Middleware`, `AgentResult`) driving the model, tools, and per-call hooks |
 
 ### Examples
 
@@ -47,7 +48,7 @@ golden-macros (compile time)  ->  golden-kernel / golden-agent (runtime)  ->  go
   `cargo build --workspace`.
 - Run an example with `cargo run -p hello-world` (or `-p article-server`); see
   `examples/article-server/README.md` for SQLite setup and `oha` stress-test instructions.
-- `golden-agent`'s examples (`tools`, `chat_completion`, `chat_stream`) additionally need
+- `golden-agent`'s examples (`agent`, `tools`, `chat_completion`, `chat_stream`) additionally need
   `DEEPSEEK_API_KEY` and network access.
 - Add shared dependencies to the root `[workspace.dependencies]` and reference them in crate
   manifests with `dep.workspace = true`.

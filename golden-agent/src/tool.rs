@@ -50,6 +50,16 @@ pub trait Tool: Send + Sync {
     fn call(&self, args: Value) -> BoxFuture<'static, Result<String, Error>>;
 }
 
+impl<T: Tool + ?Sized> Tool for &T {
+    fn spec(&self) -> ToolSpec {
+        (**self).spec()
+    }
+
+    fn call(&self, args: Value) -> BoxFuture<'static, Result<String, Error>> {
+        (**self).call(args)
+    }
+}
+
 /// A provider's wire-format tool, built from a neutral [`ToolSpec`].
 ///
 /// Every provider implements this for its own tool type — for example

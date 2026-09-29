@@ -14,7 +14,7 @@ register them statically, and the runtime takes care of the wiring.
 | [`golden-boot`](./golden-boot) | The user-facing web framework: mapping annotations, `#[golden_boot_application]` entry point, `RequestEntity`, and response helpers. |
 | [`golden-kernel`](./golden-kernel) | Core web runtime: routing, application state, request entities, and response helpers. |
 | [`golden-macros`](./golden-macros) | Procedural macros backing GoldenBoot and GoldenAgent. |
-| [`golden-agent`](./golden-agent) | Agent framework: `#[tool]` declaration, per-provider tool rendering, and chat models (OpenAI, DeepSeek, Anthropic). |
+| [`golden-agent`](./golden-agent) | Agent framework: `#[tool]` declaration, a ReAct agent loop, and chat models (OpenAI, DeepSeek, Anthropic). |
 
 ## Getting started
 
@@ -66,7 +66,7 @@ See the [golden-agent README](./golden-agent/README.md) for calling chat models 
 
 - [`examples/hello-world`](./examples/hello-world) — a minimal GoldenBoot application.
 - [`examples/article-server`](./examples/article-server) — a SQLite-backed article CRUD server.
-- [`golden-agent/examples`](./golden-agent/examples) — tool calling, chat completion, and streaming.
+- [`golden-agent/examples`](./golden-agent/examples) — the ReAct agent, a hand-rolled tool loop, chat completion, and streaming.
 
 ## License
 

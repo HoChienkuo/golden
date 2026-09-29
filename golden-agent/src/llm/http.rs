@@ -130,7 +130,8 @@ fn is_retryable(error: &Error) -> bool {
         Error::Api { status, .. } => {
             *status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
         }
-        Error::Stream(_) => false,
+        // Streaming, tool, and agent errors are not transport failures.
+        _ => false,
     }
 }
 
