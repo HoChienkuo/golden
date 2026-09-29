@@ -1,6 +1,8 @@
 //! A ReAct-style agent that drives a chat model and its tools in a loop.
 
+mod context;
 mod middleware;
+mod prompt;
 mod result;
 mod retry;
 mod state;
@@ -15,7 +17,9 @@ use futures_util::StreamExt;
 use crate::error::Error;
 use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Message, ToolCall};
 
+pub use context::Context;
 pub use middleware::{Middleware, ModelHandler, ToolHandler};
+pub use prompt::DynamicPrompt;
 pub use result::AgentResult;
 pub use retry::Retry;
 pub use state::AgentState;
@@ -83,39 +87,79 @@ impl Agent {
         AgentBuilder::default()
     }
 
-    /// Runs the agent on a single input message.
+    /// Runs the agent on a single input message with an empty context.
     pub async fn invoke(&self, input: impl Into<Message>) -> Result<AgentResult, Error> {
-        self.invoke_messages([input.into()]).await
+        self.invoke_with_context(input, Context::new()).await
     }
 
-    /// Runs the agent on an existing conversation.
-    ///
-    /// The [`system_prompt`](AgentBuilder::system_prompt), if any, is prepended.
+    /// Runs the agent on a single input message with the given run context.
+    pub async fn invoke_with_context(
+        &self,
+        input: impl Into<Message>,
+        context: Context,
+    ) -> Result<AgentResult, Error> {
+        self.invoke_messages_with_context([input.into()], context)
+            .await
+    }
+
+    /// Runs the agent on an existing conversation with an empty context.
     pub async fn invoke_messages(
         &self,
         messages: impl IntoIterator<Item = Message>,
+    ) -> Result<AgentResult, Error> {
+        self.invoke_messages_with_context(messages, Context::new())
+            .await
+    }
+
+    /// Runs the agent on an existing conversation with the given run context.
+    ///
+    /// The [`system_prompt`](AgentBuilder::system_prompt), if any, is prepended,
+    /// and `context` becomes [`AgentState::context`].
+    pub async fn invoke_messages_with_context(
+        &self,
+        messages: impl IntoIterator<Item = Message>,
+        context: Context,
     ) -> Result<AgentResult, Error> {
         let mut state = AgentState::new();
         if let Some(prompt) = &self.system_prompt {
             state.messages.push(Message::system(prompt.clone()));
         }
         state.messages.extend(messages);
+        state.context = context;
 
         self.run(&mut state).await?;
         Ok(AgentResult::new(state))
     }
 
-    /// Streams a run on a single input message.
+    /// Streams a run on a single input message with an empty context.
     pub fn stream(&self, input: impl Into<Message>) -> AgentStream<'_> {
-        self.stream_messages([input.into()])
+        self.stream_with_context(input, Context::new())
     }
 
-    /// Streams a run on an existing conversation.
+    /// Streams a run on a single input message with the given run context.
+    pub fn stream_with_context(
+        &self,
+        input: impl Into<Message>,
+        context: Context,
+    ) -> AgentStream<'_> {
+        self.stream_messages_with_context([input.into()], context)
+    }
+
+    /// Streams a run on an existing conversation with an empty context.
+    pub fn stream_messages(&self, messages: impl IntoIterator<Item = Message>) -> AgentStream<'_> {
+        self.stream_messages_with_context(messages, Context::new())
+    }
+
+    /// Streams a run on an existing conversation with the given run context.
     ///
     /// Node-style middleware hooks and [`Middleware::wrap_tool_call`] run as in
     /// [`invoke`](Agent::invoke). [`Middleware::wrap_model_call`] is skipped,
     /// because it operates on a complete response rather than a delta stream.
-    pub fn stream_messages(&self, messages: impl IntoIterator<Item = Message>) -> AgentStream<'_> {
+    pub fn stream_messages_with_context(
+        &self,
+        messages: impl IntoIterator<Item = Message>,
+        context: Context,
+    ) -> AgentStream<'_> {
         let input: Vec<Message> = messages.into_iter().collect();
         let system_prompt = self.system_prompt.clone();
         let middlewares = self.middlewares.clone();
@@ -130,6 +174,7 @@ impl Agent {
                 state.messages.push(Message::system(prompt.clone()));
             }
             state.messages.extend(input);
+            state.context = context;
 
             for middleware in &middlewares {
                 if let Err(error) = middleware.before_agent(&mut state).await {

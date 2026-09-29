@@ -30,10 +30,10 @@ golden-macros (compile time)  ->  golden-kernel / golden-agent (runtime)  ->  go
 
 | Crate | Role |
 | --- | --- |
-| `golden-kernel` (lib name `golden_core`) | Tokio runtime bootstrap + graceful shutdown, `inventory` route discovery, router assembly, duplicate-route and state-type validation, `RequestEntity`, response helpers (`ApiResponse`, `ResponseEntity`, `Page`), error types, and Axum re-exports (`web`, `header`, `multipart`, `sse`, `__private`) |
+| `golden-kernel` | Tokio runtime bootstrap + graceful shutdown, `inventory` route discovery, router assembly, duplicate-route and state-type validation, `RequestEntity`, response helpers (`ApiResponse`, `ResponseEntity`, `Page`), error types, and Axum re-exports (`web`, `header`, `multipart`, `sse`, `__private`) |
 | `golden-macros` | `proc-macro = true`; `#[golden_boot_application]`, HTTP mapping attributes, `#[derive(RequestEntity)]`, `#[tool]`; features `web`, `agent`, `all` (default) |
 | `golden-boot` | User-facing facade re-exporting kernel + macros; the usual dependency for applications |
-| `golden-agent` | `#[tool]` registration via `inventory` (`ToolDefinition`, `registered_tools` / `tool_specs` / `render_tools`); a provider-neutral tool model (`ToolSpec`, `Tool`, `FromToolSpec`, `ToolSet`); a provider-neutral `ChatModel` / `ChatStream` (`ChatRequest`, `ChatResponse`, `Message`, `ChatEvent`) with OpenAI, DeepSeek and Anthropic providers, each translating to its own wire format; `HttpConfig` (connect and request timeouts); and a ReAct loop (`Agent`, `AgentBuilder`, `AgentState`, `Middleware`, `AgentResult`) driving the model, tools, and per-call hooks, with a built-in `Retry` middleware |
+| `golden-agent` | `#[tool]` registration via `inventory` (`ToolDefinition`, `registered_tools` / `tool_specs` / `render_tools`); a provider-neutral tool model (`ToolSpec`, `Tool`, `FromToolSpec`, `ToolSet`); a provider-neutral `ChatModel` / `ChatStream` (`ChatRequest`, `ChatResponse`, `Message`, `ChatEvent`) with OpenAI, DeepSeek and Anthropic providers, each translating to its own wire format; `HttpConfig` (connect and request timeouts); and a ReAct loop (`Agent`, `AgentBuilder`, `AgentState`, `Middleware`, `AgentResult`) driving the model, tools, and per-call hooks, with `Context`, a `DynamicPrompt` middleware, and a built-in `Retry` middleware |
 
 ### Examples
 

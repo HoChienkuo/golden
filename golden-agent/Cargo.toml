@@ -1,6 +1,6 @@
 [package]
 name = "golden-agent"
-version = "0.1.3"
+version = "0.1.4"
 edition.workspace = true
 authors.workspace = true
 description = "An annotation-driven agent engineering framework for Rust"
@@ -28,6 +28,10 @@ path = "examples/agent.rs"
 [[example]]
 name = "agent_stream"
 path = "examples/agent_stream.rs"
+
+[[example]]
+name = "dynamic_prompt"
+path = "examples/dynamic_prompt.rs"
 
 [[example]]
 name = "chat_completion"
