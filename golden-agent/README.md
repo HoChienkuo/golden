@@ -56,7 +56,7 @@ streaming — live in
 - [x] Anthropic Messages API
 - [ ] Google Gemini API
 - [ ] Ollama
-- [ ] String / prompt templates
+- [x] String / prompt templates
 - [ ] Conversation history and context management
 - [x] Automatic tool-calling loop (agents)
 - [ ] Stateful tools

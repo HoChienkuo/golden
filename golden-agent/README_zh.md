@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [x] Anthropic Messages API
 - [ ] Google Gemini API
 - [ ] Ollama
-- [ ] 字符串模板 / prompt 模板
+- [x] 字符串模板 / prompt 模板
 - [ ] 会话历史与上下文管理
 - [x] 自动工具调用循环（Agent）
 - [ ] 有状态工具
