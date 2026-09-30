@@ -58,6 +58,33 @@ pub fn parse_param_attributes(attributes: &[syn::Attribute]) -> syn::Result<Para
     Ok(result)
 }
 
+/// Joins the `///` doc comments found in `attributes`, trimmed.
+///
+/// Returns `None` when there is no non-empty doc text. Used as the fallback
+/// description when `#[param(description = ...)]` is absent.
+pub fn docs_from_attributes(attributes: &[syn::Attribute]) -> Option<String> {
+    let docs: Vec<String> = attributes
+        .iter()
+        .filter_map(|attr| {
+            attr.meta
+                .require_name_value()
+                .ok()
+                .filter(|nv| nv.path.is_ident("doc"))
+                .and_then(|nv| match &nv.value {
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(s),
+                        ..
+                    }) => Some(s.value()),
+                    _ => None,
+                })
+        })
+        .collect();
+
+    let joined = docs.join("\n").trim().to_string();
+
+    (!joined.is_empty()).then_some(joined)
+}
+
 /// Extracts the value of a string literal, reporting `name` on failure.
 fn string_literal(expr: &syn::Expr, name: &str) -> syn::Result<String> {
     match expr {

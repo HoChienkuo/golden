@@ -251,9 +251,18 @@ pub fn tool(arguments: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Field attributes
 ///
-/// - `#[param(description = "...")]` documents the field for the model.
+/// - `#[param(description = "...")]` documents the field for the model. When
+///   absent, the field's `///` doc comment is used instead.
 /// - `#[param(required = false)]` removes the field from the schema's
 ///   `required` list. By default every field is required except `Option<T>`.
+///
+/// # Limitations
+///
+/// The struct must be concrete. Deriving on a struct with type, lifetime, or
+/// `const` generic parameters is a compile error: a correct impl would have to
+/// forward them (`impl<T> ToolSchema for Paged<T>`) and bound every generic
+/// field type (`T: ToolSchema`), which the derive cannot infer on its own.
+/// Wrap the generic type in a concrete struct instead.
 ///
 /// # Example
 ///
@@ -262,10 +271,10 @@ pub fn tool(arguments: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// #[derive(serde::Deserialize, ToolSchema)]
 /// struct Order {
-///     #[param(description = "Name of the item to order")]
+///     /// Name of the item to order.
 ///     item: String,
 ///
-///     #[param(description = "How many units to order")]
+///     /// How many units to order; `#[param]` overrides are still available.
 ///     quantity: u32,
 /// }
 /// ```

@@ -75,9 +75,9 @@ impl<T: Tool + ?Sized> Tool for &T {
 ///
 /// #[derive(serde::Deserialize, ToolSchema)]
 /// struct Order {
-///     #[param(description = "Name of the item to order")]
+///     /// Name of the item to order.
 ///     item: String,
-///     #[param(description = "How many units to order")]
+///     /// How many units to order.
 ///     quantity: u32,
 /// }
 ///
@@ -90,7 +90,11 @@ impl<T: Tool + ?Sized> Tool for &T {
 ///
 /// `#[param(description = "...")]` and `#[param(required = false)]` are read
 /// from each field the same way they are read from a `#[tool]` function
-/// parameter; `Option<T>` fields are optional unless overridden.
+/// parameter; a field without `#[param(description ...)]` falls back to its
+/// `///` doc comment, `Option<T>` fields are optional unless overridden. The
+/// derive requires a concrete struct — generic parameters are rejected with a
+/// compile error, because the generated impl cannot forward them or infer the
+/// `T: ToolSchema` bounds their fields would need.
 pub trait ToolSchema {
     /// Builds this type's JSON Schema as a `serde_json::Value`.
     fn schema() -> Value;

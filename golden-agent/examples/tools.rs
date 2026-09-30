@@ -25,11 +25,9 @@ async fn calculator(expression: String) -> String {
 #[derive(Deserialize, Serialize, ToolSchema)]
 struct Order {
     /// Name of the item to order.
-    #[param(description = "Name of the item to order")]
     item: String,
 
     /// How many units to order.
-    #[param(description = "How many units to order")]
     quantity: u32,
 }
 

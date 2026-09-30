@@ -1,11 +1,23 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::DeriveInput;
+use syn::{DeriveInput, Error};
 
 use super::parse::parse_fields;
 use crate::schema::{object_schema, type_to_schema, with_description};
 
 pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
+    // A generic struct cannot be supported honestly: the generated impl would
+    // have to forward the parameters (`impl<T> ToolSchema for Paged<T>`) and
+    // bound every field type (`T: ToolSchema`), which the derive cannot infer.
+    // Rejecting beats emitting an impl that fails with a confusing mismatch.
+    if !input.generics.params.is_empty() {
+        return Err(Error::new_spanned(
+            &input.generics,
+            "`ToolSchema` does not support generic structs; \
+             wrap the generic type in a concrete struct instead",
+        ));
+    }
+
     let ident = input.ident.clone();
     let fields = parse_fields(&input)?;
 

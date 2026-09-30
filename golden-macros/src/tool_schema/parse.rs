@@ -1,7 +1,7 @@
 use syn::{Data, DeriveInput, Error, Fields};
 
 use super::model::SchemaField;
-use crate::schema::parse_param_attributes;
+use crate::schema::{docs_from_attributes, parse_param_attributes};
 
 /// Reads the named struct's fields and their `#[param(...)]` metadata.
 pub fn parse_fields(input: &DeriveInput) -> syn::Result<Vec<SchemaField>> {
@@ -31,10 +31,16 @@ pub fn parse_fields(input: &DeriveInput) -> syn::Result<Vec<SchemaField>> {
 
         let meta = parse_param_attributes(&field.attrs)?;
 
+        // `#[param(description = ...)]` wins; otherwise the field's `///` doc
+        // serves as the description, matching `#[tool]`'s doc fallback.
+        let description = meta
+            .description
+            .or_else(|| docs_from_attributes(&field.attrs));
+
         result.push(SchemaField {
             ident,
             ty: field.ty.clone(),
-            description: meta.description,
+            description,
             required: meta.required,
         });
     }

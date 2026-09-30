@@ -157,25 +157,7 @@ fn parse_attributes(arguments: TokenStream) -> syn::Result<ToolAttributes> {
 }
 
 fn extract_docs(function: &ItemFn) -> String {
-    let docs: Vec<String> = function
-        .attrs
-        .iter()
-        .filter_map(|attr| {
-            attr.meta
-                .require_name_value()
-                .ok()
-                .filter(|nv| nv.path.is_ident("doc"))
-                .and_then(|nv| match &nv.value {
-                    syn::Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Str(s),
-                        ..
-                    }) => Some(s.value()),
-                    _ => None,
-                })
-        })
-        .collect();
-
-    docs.join("\n").trim().to_string()
+    crate::schema::docs_from_attributes(&function.attrs).unwrap_or_default()
 }
 
 struct Param {
