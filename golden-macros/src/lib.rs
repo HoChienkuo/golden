@@ -3,7 +3,11 @@ mod crate_path;
 mod mappings;
 mod request_entity;
 #[cfg(feature = "agent")]
+mod schema;
+#[cfg(feature = "agent")]
 mod tool_attr;
+#[cfg(feature = "agent")]
+mod tool_schema;
 
 use crate::mappings::HttpMethod;
 use proc_macro::TokenStream;
@@ -186,6 +190,18 @@ pub fn derive_request_entity(item: TokenStream) -> TokenStream {
 /// as a JSON Schema. The return value is serialized to JSON and fed back to the
 /// model.
 ///
+/// A parameter's schema entry defaults to its Rust type. Describe a parameter
+/// for the model with `#[param(description = "...")]`, and override whether it
+/// is listed as required with `#[param(required = false)]` (by default
+/// `Option<T>` parameters are optional and all others are required).
+///
+/// A parameter whose type is not a primitive (`String`, an integer, a float,
+/// `bool`, `Vec<T>` or `Option<T>`) must implement
+/// `ToolSchema` so the model can see its fields
+/// instead of a bare `{"type": "object"}`; derive it with
+/// `#[derive(ToolSchema)]` and annotate its fields with the same `#[param(...)]`
+/// attributes.
+///
 /// # Example
 ///
 /// ```ignore
@@ -193,14 +209,70 @@ pub fn derive_request_entity(item: TokenStream) -> TokenStream {
 ///
 /// /// Get the current weather for a city.
 /// #[tool]
-/// async fn get_weather(city: String) -> String {
+/// async fn get_weather(
+///     #[param(description = "City name, e.g. Taipei")]
+///     city: String,
+///     #[param(description = "Temperature unit: celsius or fahrenheit")]
+///     unit: Option<String>,
+/// ) -> String {
 ///     format!("{city}: 20°C")
+/// }
+/// ```
+///
+/// A custom parameter type expands its fields into the schema:
+///
+/// ```ignore
+/// use golden_agent::ToolSchema;
+///
+/// #[derive(serde::Deserialize, ToolSchema)]
+/// struct Order {
+///     #[param(description = "Name of the item to order")]
+///     item: String,
+///     #[param(description = "How many units to order")]
+///     quantity: u32,
 /// }
 /// ```
 #[cfg(feature = "agent")]
 #[proc_macro_attribute]
 pub fn tool(arguments: TokenStream, item: TokenStream) -> TokenStream {
     tool_attr::expand(arguments, item)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Derives a JSON Schema for a struct used as a `#[tool]` parameter.
+///
+/// Every field becomes a property in the generated schema, so the model sees
+/// the struct's shape instead of a bare `{"type": "object"}`. Field types are
+/// mapped with the same rules `#[tool]` uses for function parameters:
+/// primitives map to their JSON type, `Vec<T>` to an array, `Option<T>` to an
+/// optional (non-required) property, and any other type must itself implement
+/// `ToolSchema`.
+///
+/// # Field attributes
+///
+/// - `#[param(description = "...")]` documents the field for the model.
+/// - `#[param(required = false)]` removes the field from the schema's
+///   `required` list. By default every field is required except `Option<T>`.
+///
+/// # Example
+///
+/// ```ignore
+/// use golden_agent::ToolSchema;
+///
+/// #[derive(serde::Deserialize, ToolSchema)]
+/// struct Order {
+///     #[param(description = "Name of the item to order")]
+///     item: String,
+///
+///     #[param(description = "How many units to order")]
+///     quantity: u32,
+/// }
+/// ```
+#[cfg(feature = "agent")]
+#[proc_macro_derive(ToolSchema, attributes(param))]
+pub fn derive_tool_schema(item: TokenStream) -> TokenStream {
+    tool_schema::expand(item)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

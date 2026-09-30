@@ -1,10 +1,14 @@
 use golden_agent::tool;
-use golden_agent::{ChatModel, ChatRequest, DeepSeekLlm, DeepSeekModel, Message, Tool};
+use golden_agent::{ChatModel, ChatRequest, DeepSeekLlm, DeepSeekModel, Message, Tool, ToolSchema};
 use serde::{Deserialize, Serialize};
 
 /// Get the current weather for a city, in the given unit.
 #[tool]
-async fn get_weather(city: String, unit: String) -> String {
+async fn get_weather(
+    #[param(description = "City name, e.g. Beijing")] city: String,
+    #[param(description = "Temperature unit: celsius or fahrenheit")] unit: Option<String>,
+) -> String {
+    let unit = unit.unwrap_or_else(|| "celsius".to_string());
     format!("The weather in {city} is 20 degrees {unit}")
 }
 
@@ -15,9 +19,17 @@ async fn calculator(expression: String) -> String {
 }
 
 /// A structured request demonstrating custom Deserialize parameter types.
-#[derive(Deserialize, Serialize)]
+///
+/// `ToolSchema` expands the struct's fields into the JSON Schema sent to the
+/// model, so it sees `item` and `quantity` rather than a bare object.
+#[derive(Deserialize, Serialize, ToolSchema)]
 struct Order {
+    /// Name of the item to order.
+    #[param(description = "Name of the item to order")]
     item: String,
+
+    /// How many units to order.
+    #[param(description = "How many units to order")]
     quantity: u32,
 }
 

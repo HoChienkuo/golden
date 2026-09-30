@@ -89,7 +89,6 @@ golden-macros (compile time)  ->  golden-kernel / golden-agent (runtime)  ->  go
 - Before opening, all must pass: `cargo fmt`,
   `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`.
 - Update related docs/READMEs (`README.md`, `README_zh.md`, per-crate READMEs) in the same PR.
-- Call out any breaking change to a public macro or type explicitly.
 
 ### Commit messages
 
@@ -109,15 +108,9 @@ Follow [Conventional Commits](https://www.conventionalcommits.org):
 - `description`: imperative mood, lowercase, no trailing period; keep the subject within ~72
   characters.
 - Body: optional; explain the *what* and *why*, using `-` bullets for multiple points.
-- Breaking change: add `!` after the type/scope and a `BREAKING CHANGE:` footer describing the
-  migration.
 
 ```
 feat(golden-agent): add annotation-driven agent framework foundation
 fix(request-entity): report the actual missing header name
 docs: document application state validation
-
-feat(golden-macros)!: drop the legacy `#[controller]` attribute
-
-BREAKING CHANGE: use `#[get_mapping]` instead.
 ```

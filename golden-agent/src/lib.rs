@@ -23,15 +23,19 @@ pub use llm::{
     AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, HttpConfig, OpenAiLlm, OpenAiModel,
 };
 pub use tool::{
-    FromToolSpec, Tool, ToolDefinition, ToolSpec, registered_tools, render_tools, tool_specs,
+    FromToolSpec, Tool, ToolDefinition, ToolSchema, ToolSpec, registered_tools, render_tools,
+    tool_specs,
 };
+
+#[doc(inline)]
+pub use golden_macros::ToolSchema;
 
 #[doc(inline)]
 pub use golden_macros::tool;
 
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::tool::ToolDefinition;
+    pub use crate::tool::{ToolDefinition, ToolSchema};
     pub use futures_util;
     pub use inventory;
     pub use serde_json;

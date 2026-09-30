@@ -3,15 +3,18 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Error, FnArg, ItemFn, Pat, ReturnType, Type, parse::Parser};
 
+use crate::schema::{object_schema, parse_param_attributes, type_to_schema, with_description};
+
 /// Expands the `#[tool]` attribute macro.
 pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStream2> {
-    let function = syn::parse::<ItemFn>(item)?;
+    let mut function = syn::parse::<ItemFn>(item)?;
 
     validate_tool_function(&function)?;
 
     let attributes = parse_attributes(arguments)?;
 
-    let function_name = &function.sig.ident;
+    // Own the identifier so `function` can be mutated below without holding a borrow.
+    let function_name = function.sig.ident.clone();
     let register_ident = format_ident!("__golden_register_tool_{}", function_name);
     let schema_ident = format_ident!("__golden_schema_tool_{}", function_name);
 
@@ -29,6 +32,10 @@ pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStr
     let params = collect_params(&function)?;
     let param_names: Vec<&syn::Ident> = params.iter().map(|p| &p.name).collect();
     let param_types: Vec<&Type> = params.iter().map(|p| &p.ty).collect();
+
+    // `#[param(...)]` is metadata for this macro only; strip it so it never
+    // reaches the emitted function, where rustc would report `unused attribute`.
+    strip_param_attributes(&mut function);
 
     // The return type, used to type the output. Defaults to serde_json::Value.
     let return_ty = match &function.sig.output {
@@ -174,6 +181,8 @@ fn extract_docs(function: &ItemFn) -> String {
 struct Param {
     name: syn::Ident,
     ty: Type,
+    description: Option<String>,
+    required: Option<bool>,
 }
 
 fn collect_params(function: &ItemFn) -> syn::Result<Vec<Param>> {
@@ -191,109 +200,55 @@ fn collect_params(function: &ItemFn) -> syn::Result<Vec<Param>> {
             ));
         };
 
+        let meta = parse_param_attributes(&pat_type.attrs)?;
+
         params.push(Param {
             name: pat_ident.ident.clone(),
             ty: (*pat_type.ty).clone(),
+            description: meta.description,
+            required: meta.required,
         });
     }
 
     Ok(params)
 }
 
+/// Removes every `#[param(...)]` attribute from the function's parameters.
+///
+/// `collect_params` reads them first; they are metadata for `#[tool]` only and
+/// have no backing macro, so they must not be emitted.
+fn strip_param_attributes(function: &mut ItemFn) {
+    for input in &mut function.sig.inputs {
+        let FnArg::Typed(pat_type) = input else {
+            continue;
+        };
+
+        pat_type.attrs.retain(|attr| !attr.path().is_ident("param"));
+    }
+}
+
 fn build_schema_body(function: &ItemFn, golden_agent: &TokenStream2) -> syn::Result<TokenStream2> {
     let params = collect_params(function)?;
 
-    // Collect the per-parameter schema expressions and their names.
-    let mut name_tokens = Vec::new();
-    let mut schema_tokens = Vec::new();
+    let mut fields = Vec::new();
+    let mut required_names = Vec::new();
 
     for param in &params {
         let name = param.name.to_string();
         let ty_schema = type_to_schema(&param.ty, golden_agent)?;
-        name_tokens.push(name);
-        schema_tokens.push(ty_schema);
-    }
+        let ty_schema = with_description(golden_agent, ty_schema, param.description.as_ref());
 
-    Ok(quote! {
+        if param
+            .required
+            .unwrap_or(!crate::schema::is_option(&param.ty))
         {
-            let mut __schema = #golden_agent::__private::serde_json::Map::new();
-            __schema.insert(
-                "type".to_string(),
-                #golden_agent::__private::serde_json::Value::String("object".to_string()),
-            );
-            let mut __properties = #golden_agent::__private::serde_json::Map::new();
-            #(
-                __properties.insert(#name_tokens.to_string(), #schema_tokens);
-            )*
-            __schema.insert(
-                "properties".to_string(),
-                #golden_agent::__private::serde_json::Value::Object(__properties),
-            );
-            let __required: ::std::vec::Vec<#golden_agent::__private::serde_json::Value> =
-                ::std::vec![#(#golden_agent::__private::serde_json::Value::String(#name_tokens.to_string())),*];
-            __schema.insert(
-                "required".to_string(),
-                #golden_agent::__private::serde_json::Value::Array(__required),
-            );
-            #golden_agent::__private::serde_json::Value::Object(__schema)
+            required_names.push(name.clone());
         }
-    })
-}
 
-/// Maps a Rust type to a JSON Schema expression (a `serde_json::Value` builder).
-fn type_to_schema(ty: &Type, golden_agent: &TokenStream2) -> syn::Result<TokenStream2> {
-    let Type::Path(type_path) = ty else {
-        return Err(Error::new_spanned(
-            ty,
-            "unsupported `#[tool]` parameter type",
-        ));
-    };
-
-    let Some(segment) = type_path.path.segments.last() else {
-        return Err(Error::new_spanned(
-            ty,
-            "unsupported `#[tool]` parameter type",
-        ));
-    };
-
-    let ident = segment.ident.to_string();
-
-    let primitive = |kind: &str| {
-        quote! {
-            #golden_agent::__private::serde_json::json!({ "type": #kind })
-        }
-    };
-
-    match ident.as_str() {
-        "String" | "str" | "&str" => Ok(primitive("string")),
-        "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "i32" | "i64" | "isize" | "f32"
-        | "f64" => Ok(primitive("number")),
-        "bool" => Ok(primitive("boolean")),
-        "Vec" => {
-            let inner = first_type_argument(segment)?;
-            let inner_schema = type_to_schema(inner, golden_agent)?;
-            Ok(quote! {
-                #golden_agent::__private::serde_json::json!({ "type": "array", "items": #inner_schema })
-            })
-        }
-        "Option" => {
-            let inner = first_type_argument(segment)?;
-            type_to_schema(inner, golden_agent)
-        }
-        _ => Ok(primitive("object")),
+        fields.push((name, ty_schema));
     }
-}
 
-fn first_type_argument(segment: &syn::PathSegment) -> syn::Result<&Type> {
-    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
-        return Err(Error::new_spanned(segment, "expected a type argument"));
-    };
-
-    let Some(syn::GenericArgument::Type(inner)) = arguments.args.first() else {
-        return Err(Error::new_spanned(segment, "expected a type argument"));
-    };
-
-    Ok(inner)
+    Ok(object_schema(golden_agent, &fields, &required_names))
 }
 
 fn validate_tool_function(function: &ItemFn) -> syn::Result<()> {

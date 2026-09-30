@@ -60,6 +60,42 @@ impl<T: Tool + ?Sized> Tool for &T {
     }
 }
 
+/// Describes a Rust type as a JSON Schema object for tool parameters.
+///
+/// [`#[tool]`](macro@crate::tool) maps primitive parameter types
+/// (`String`, integers, floats, `bool`, `Vec<T>`, `Option<T>`) straight to their
+/// schema. Any other parameter type — a `struct` carrying the model's expected
+/// arguments, for example — must implement this trait so the model can see the
+/// type's fields instead of a bare `{"type": "object"}`.
+///
+/// Derive it rather than writing the implementation by hand:
+///
+/// ```ignore
+/// use golden_agent::ToolSchema;
+///
+/// #[derive(serde::Deserialize, ToolSchema)]
+/// struct Order {
+///     #[param(description = "Name of the item to order")]
+///     item: String,
+///     #[param(description = "How many units to order")]
+///     quantity: u32,
+/// }
+///
+/// /// Place an order for a structured item.
+/// #[golden_agent::tool]
+/// async fn place_order(order: Order) -> String {
+///     format!("Ordered {} x {}", order.quantity, order.item)
+/// }
+/// ```
+///
+/// `#[param(description = "...")]` and `#[param(required = false)]` are read
+/// from each field the same way they are read from a `#[tool]` function
+/// parameter; `Option<T>` fields are optional unless overridden.
+pub trait ToolSchema {
+    /// Builds this type's JSON Schema as a `serde_json::Value`.
+    fn schema() -> Value;
+}
+
 /// A provider's wire-format tool, built from a neutral [`ToolSpec`].
 ///
 /// Every provider implements this for its own tool type — for example
