@@ -54,6 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [ ] Google Gemini API
 - [ ] Ollama
 - [x] 字符串模板 / prompt 模板
+- [x] 结构化输出（`response_format` 与类型化解析）
 - [ ] 会话历史与上下文管理
 - [x] 自动工具调用循环（Agent）
 - [ ] 有状态工具

@@ -1,15 +1,15 @@
 use crate::llm::chat::{
-    ChatRequest, ChatResponse, Content, ContentPart, FinishReason, Message, Role, ToolCall,
-    ToolChoice, Usage,
+    ChatRequest, ChatResponse, Content, ContentPart, FinishReason, Message, ResponseFormat, Role,
+    ToolCall, ToolChoice, Usage,
 };
 use crate::tool::FromToolSpec;
 
 use super::{
     ChatRequest as WireRequest, ChatResponse as WireResponse, Content as WireContent,
-    ContentPart as WireContentPart, FunctionCall, ImageUrl, Message as WireMessage, NamedFunction,
-    NamedToolChoice, ResponseMessage as WireResponseMessage, Stop, Tool as WireTool,
-    ToolCall as WireToolCall, ToolChoice as WireToolChoice, ToolChoiceMode, ToolType,
-    Usage as WireUsage,
+    ContentPart as WireContentPart, FunctionCall, ImageUrl, JsonSchema as WireJsonSchema,
+    Message as WireMessage, NamedFunction, NamedToolChoice, ResponseFormat as WireResponseFormat,
+    ResponseMessage as WireResponseMessage, Stop, Tool as WireTool, ToolCall as WireToolCall,
+    ToolChoice as WireToolChoice, ToolChoiceMode, ToolType, Usage as WireUsage,
 };
 
 /// Translates a neutral [`ChatRequest`] into an OpenAI wire request.
@@ -27,7 +27,31 @@ pub(crate) fn to_wire_request(request: &ChatRequest, stream: bool) -> WireReques
         .stop
         .as_ref()
         .map(|sequences| Stop::Multiple(sequences.clone()));
+    wire.response_format = request
+        .response_format
+        .as_ref()
+        .map(to_wire_response_format);
     wire
+}
+
+/// Translates a neutral [`ResponseFormat`] into the OpenAI wire format.
+fn to_wire_response_format(format: &ResponseFormat) -> WireResponseFormat {
+    match format {
+        ResponseFormat::Text => WireResponseFormat::Text,
+        ResponseFormat::JsonObject => WireResponseFormat::JsonObject,
+        ResponseFormat::JsonSchema {
+            name,
+            schema,
+            strict,
+        } => WireResponseFormat::JsonSchema {
+            json_schema: WireJsonSchema {
+                name: name.clone(),
+                description: None,
+                schema: Some(schema.clone()),
+                strict: Some(*strict),
+            },
+        },
+    }
 }
 
 /// Translates an OpenAI wire response into a neutral [`ChatResponse`].

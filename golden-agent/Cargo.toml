@@ -44,3 +44,7 @@ path = "examples/chat_stream.rs"
 [[example]]
 name = "tools"
 path = "examples/tools.rs"
+
+[[example]]
+name = "structured_output"
+path = "examples/structured_output.rs"

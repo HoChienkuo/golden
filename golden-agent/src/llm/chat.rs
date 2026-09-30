@@ -2,6 +2,8 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures_core::Stream;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use crate::error::Error;
 use crate::tool::ToolSpec;
@@ -225,6 +227,27 @@ pub enum ToolChoice {
     Tool(String),
 }
 
+/// The format the model's output must conform to.
+///
+/// This is the provider-neutral form of OpenAI's `response_format`. Providers
+/// with no equivalent (Anthropic) ignore the field.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResponseFormat {
+    /// Plain text output (the default).
+    Text,
+    /// A single JSON object.
+    JsonObject,
+    /// A single JSON object matching the supplied JSON Schema.
+    JsonSchema {
+        /// The schema name shown to the model.
+        name: String,
+        /// The JSON Schema the output must satisfy.
+        schema: Value,
+        /// Whether the provider must enforce adherence strictly.
+        strict: bool,
+    },
+}
+
 /// A chat completion request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatRequest {
@@ -244,6 +267,8 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     /// Stop sequences.
     pub stop: Option<Vec<String>>,
+    /// The required format of the model's output.
+    pub response_format: Option<ResponseFormat>,
 }
 
 impl ChatRequest {
@@ -258,6 +283,7 @@ impl ChatRequest {
             top_p: None,
             max_tokens: None,
             stop: None,
+            response_format: None,
         }
     }
 
@@ -308,6 +334,12 @@ impl ChatRequest {
         self.stop = Some(sequences.into_iter().map(Into::into).collect());
         self
     }
+
+    /// Sets the required format of the model's output.
+    pub fn response_format(mut self, format: ResponseFormat) -> Self {
+        self.response_format = Some(format);
+        self
+    }
 }
 
 /// A chat completion response.
@@ -330,6 +362,52 @@ impl ChatResponse {
     pub fn text(&self) -> &str {
         self.message.text()
     }
+
+    /// Deserializes the assistant text into `T`.
+    ///
+    /// An optional ```` ```json ```` fence is stripped before parsing. On
+    /// failure the returned [`Error::InvalidStructuredOutput`] carries the raw
+    /// response text, so the caller can log it or feed it back for a retry.
+    ///
+    /// ```
+    /// use golden_agent::{ChatResponse, Message, Role};
+    ///
+    /// let response = ChatResponse {
+    ///     id: "id".into(),
+    ///     model: "model".into(),
+    ///     message: Message::assistant(r#"{"temperature_c": 28.5}"#),
+    ///     finish_reason: None,
+    ///     usage: None,
+    /// };
+    ///
+    /// #[derive(serde::Deserialize)]
+    /// struct Weather {
+    ///     temperature_c: f64,
+    /// }
+    ///
+    /// let weather: Weather = response.structured()?;
+    /// assert_eq!(weather.temperature_c, 28.5);
+    /// # Ok::<(), golden_agent::Error>(())
+    /// ```
+    pub fn structured<T: DeserializeOwned>(&self) -> Result<T, Error> {
+        let text = self.text();
+        serde_json::from_str(strip_json_fence(text)).map_err(|source| {
+            Error::InvalidStructuredOutput {
+                source,
+                raw: text.to_string(),
+            }
+        })
+    }
+}
+
+/// Strips an optional ```` ```json ```` fence and surrounding whitespace.
+fn strip_json_fence(text: &str) -> &str {
+    let text = text.trim();
+    let text = text
+        .strip_prefix("```json")
+        .or_else(|| text.strip_prefix("```"))
+        .unwrap_or(text);
+    text.strip_suffix("```").unwrap_or(text).trim()
 }
 
 /// Why the model stopped generating.

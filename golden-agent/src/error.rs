@@ -60,6 +60,16 @@ pub enum Error {
         /// The missing setting name.
         name: &'static str,
     },
+
+    /// The response text did not deserialize into the requested type.
+    #[error("failed to parse structured output: {source}")]
+    InvalidStructuredOutput {
+        /// The deserialization failure.
+        #[source]
+        source: serde_json::Error,
+        /// The raw response text that failed to parse.
+        raw: String,
+    },
 }
 
 /// The OpenAI-style error response body.

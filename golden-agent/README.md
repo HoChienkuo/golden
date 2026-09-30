@@ -57,6 +57,7 @@ streaming — live in
 - [ ] Google Gemini API
 - [ ] Ollama
 - [x] String / prompt templates
+- [x] Structured output (`response_format` and typed parsing)
 - [ ] Conversation history and context management
 - [x] Automatic tool-calling loop (agents)
 - [ ] Stateful tools

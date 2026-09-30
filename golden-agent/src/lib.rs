@@ -17,7 +17,7 @@ pub use agent::{
 pub use error::{ApiErrorBody, ApiErrorDetail, Error};
 pub use llm::chat::{
     ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, Content, ContentPart,
-    FinishReason, Message, Role, ToolCall, ToolChoice, Usage,
+    FinishReason, Message, ResponseFormat, Role, ToolCall, ToolChoice, Usage,
 };
 pub use llm::{
     AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, HttpConfig, OpenAiLlm, OpenAiModel,
