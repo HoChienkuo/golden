@@ -70,8 +70,8 @@ pub type AgentStream<'a> = Pin<Box<dyn Stream<Item = Result<AgentEvent, Error>> 
 /// A ReAct-style agent.
 ///
 /// It calls the model, runs the tools the model requests, feeds the results
-/// back, and repeats until the model stops calling tools or `max_steps` is
-/// reached.
+/// back, and repeats until the model stops calling tools, a tool declared
+/// `return_direct` supplies the final answer, or `max_steps` is reached.
 pub struct Agent {
     model: Arc<dyn ChatModel>,
     request: ChatRequest,
@@ -243,11 +243,17 @@ impl Agent {
                     return;
                 }
 
+                let mut direct: Option<String> = None;
                 for call in tool_calls {
                     yield Ok(AgentEvent::ToolCall(call.clone()));
 
                     let content = match tool.handle(call.clone()).await {
-                        Ok(content) => content,
+                        Ok(content) => {
+                            if direct.is_none() && returns_direct(&tools, &call.name) {
+                                direct = Some(content.clone());
+                            }
+                            content
+                        }
                         Err(error) if config.abort_on_tool_error => {
                             yield Err(error);
                             return;
@@ -263,6 +269,23 @@ impl Agent {
                 }
 
                 steps += 1;
+
+                // A `return_direct` tool's result is the final answer: echo it
+                // as the last assistant message and end the run without
+                // another model call.
+                if let Some(content) = direct {
+                    state
+                        .messages
+                        .push(Message::assistant(direct_answer(&content)));
+                    for middleware in &middlewares {
+                        if let Err(error) = middleware.after_agent(&mut state).await {
+                            yield Err(error);
+                            return;
+                        }
+                    }
+                    yield Ok(AgentEvent::Done);
+                    return;
+                }
             }
         })
     }
@@ -303,13 +326,32 @@ impl Agent {
                 break;
             }
 
+            let mut direct: Option<String> = None;
             for call in &response.message.tool_calls {
-                let content = match tool.handle(call.clone()).await {
-                    Ok(content) => content,
+                match tool.handle(call.clone()).await {
+                    Ok(content) => {
+                        if direct.is_none() && returns_direct(&self.tools, &call.name) {
+                            direct = Some(content.clone());
+                        }
+                        state.messages.push(Message::tool(call.id.clone(), content));
+                    }
                     Err(error) if self.config.abort_on_tool_error => return Err(error),
-                    Err(error) => format!("Error: {error}"),
-                };
-                state.messages.push(Message::tool(call.id.clone(), content));
+                    Err(error) => {
+                        state
+                            .messages
+                            .push(Message::tool(call.id.clone(), format!("Error: {error}")));
+                    }
+                }
+            }
+
+            // A `return_direct` tool's result is the final answer: echo it as
+            // the last assistant message and end the run without another model
+            // call.
+            if let Some(content) = direct {
+                state
+                    .messages
+                    .push(Message::assistant(direct_answer(&content)));
+                break;
             }
 
             steps += 1;
@@ -329,6 +371,21 @@ impl Agent {
         request.tools = self.tools.specs();
         request
     }
+}
+
+/// Whether the named tool is declared `return_direct`.
+fn returns_direct(tools: &ToolSet, name: &str) -> bool {
+    tools
+        .get(name)
+        .is_some_and(|tool| tool.spec().return_direct)
+}
+
+/// The user-facing final answer built from a `return_direct` tool result.
+///
+/// Tool results are JSON-encoded for the model, so a plain string answer is
+/// unwrapped here; anything else (numbers, objects) stays as it is.
+fn direct_answer(content: &str) -> String {
+    serde_json::from_str::<String>(content).unwrap_or_else(|_| content.to_string())
 }
 
 /// Builds an [`Agent`].

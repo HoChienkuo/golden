@@ -22,6 +22,7 @@ pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStr
     let description = attributes
         .description
         .unwrap_or_else(|| extract_docs(&function));
+    let return_direct = attributes.return_direct;
 
     let golden_agent = crate::crate_path::golden_agent()?;
 
@@ -94,6 +95,7 @@ pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStr
                 description: #description,
                 schema: #schema_ident,
                 call: #register_ident,
+                return_direct: #return_direct,
             }
         }
     })
@@ -102,58 +104,102 @@ pub fn expand(arguments: TokenStream, item: TokenStream) -> syn::Result<TokenStr
 struct ToolAttributes {
     name: Option<String>,
     description: Option<String>,
+    return_direct: bool,
 }
 
 fn parse_attributes(arguments: TokenStream) -> syn::Result<ToolAttributes> {
     let mut name = None;
     let mut description = None;
+    let mut return_direct = false;
 
     if arguments.is_empty() {
-        return Ok(ToolAttributes { name, description });
+        return Ok(ToolAttributes {
+            name,
+            description,
+            return_direct,
+        });
     }
 
-    let parser =
-        syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated;
+    // `Meta` accepts both `name = "..."` pairs and the bare `return_direct`
+    // flag.
+    let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
     let arguments = parser.parse(arguments)?;
 
     for argument in &arguments {
-        if argument.path.is_ident("name") {
-            let value = match &argument.value {
-                syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(s),
-                    ..
-                }) => s.value(),
+        if argument.path().is_ident("return_direct") {
+            return_direct = match argument {
+                syn::Meta::Path(_) => true,
+                syn::Meta::NameValue(name_value) => match &name_value.value {
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Bool(value),
+                        ..
+                    }) => value.value(),
+                    _ => {
+                        return Err(Error::new_spanned(
+                            &name_value.value,
+                            "`return_direct` must be `true` or `false`",
+                        ));
+                    }
+                },
                 _ => {
                     return Err(Error::new_spanned(
-                        &argument.value,
-                        "`name` must be a string literal",
+                        argument,
+                        "`return_direct` takes no list; write `return_direct` or `return_direct = true`",
                     ));
                 }
             };
-            name = Some(value);
-        } else if argument.path.is_ident("description") {
-            let value = match &argument.value {
-                syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(s),
-                    ..
-                }) => s.value(),
-                _ => {
-                    return Err(Error::new_spanned(
-                        &argument.value,
-                        "`description` must be a string literal",
-                    ));
-                }
-            };
-            description = Some(value);
-        } else {
+            continue;
+        }
+
+        if !argument.path().is_ident("name") && !argument.path().is_ident("description") {
             return Err(Error::new_spanned(
-                &argument.path,
-                "unsupported `#[tool]` argument; expected `name` or `description`",
+                argument.path(),
+                "unsupported `#[tool]` argument; expected `name`, `description`, or `return_direct`",
             ));
+        }
+
+        let syn::Meta::NameValue(name_value) = argument else {
+            let which = if argument.path().is_ident("name") {
+                "name"
+            } else {
+                "description"
+            };
+            return Err(Error::new_spanned(
+                argument,
+                format!("`{which}` must be a string literal"),
+            ));
+        };
+
+        let value = match &name_value.value {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) => s.value(),
+            _ => {
+                let which = if name_value.path.is_ident("name") {
+                    "name"
+                } else {
+                    "description"
+                };
+                return Err(Error::new_spanned(
+                    &name_value.value,
+                    format!("`{which}` must be a string literal"),
+                ));
+            }
+        };
+
+        if name_value.path.is_ident("name") {
+            name = Some(value);
+        } else {
+            description = Some(value);
         }
     }
 
-    Ok(ToolAttributes { name, description })
+    Ok(ToolAttributes {
+        name,
+        description,
+        return_direct,
+    })
 }
 
 fn extract_docs(function: &ItemFn) -> String {

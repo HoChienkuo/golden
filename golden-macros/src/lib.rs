@@ -186,6 +186,11 @@ pub fn derive_request_entity(item: TokenStream) -> TokenStream {
 /// doc comment. Both can be overridden with `#[tool(name = "...",
 /// description = "...")]`.
 ///
+/// Declare `#[tool(return_direct)]` (or `#[tool(return_direct = true)]`) to
+/// end the agent run as soon as this tool executes: its result becomes the
+/// final answer — echoed as the last assistant message — instead of being fed
+/// back to the model for another round.
+///
 /// Parameters are derived from the function signature and exposed to the model
 /// as a JSON Schema. The return value is serialized to JSON and fed back to the
 /// model.

@@ -1,6 +1,6 @@
 [package]
 name = "golden-agent"
-version = "0.1.4"
+version = "0.1.5"
 edition.workspace = true
 authors.workspace = true
 description = "An annotation-driven agent engineering framework for Rust"
@@ -24,6 +24,10 @@ golden-macros = { path = "../golden-macros", features = ["agent"] }
 [[example]]
 name = "agent"
 path = "examples/agent.rs"
+
+[[example]]
+name = "return_direct"
+path = "examples/return_direct.rs"
 
 [[example]]
 name = "agent_stream"

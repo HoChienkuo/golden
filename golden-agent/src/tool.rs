@@ -19,10 +19,16 @@ pub struct ToolSpec {
     pub description: Cow<'static, str>,
     /// The JSON Schema describing the tool's parameters.
     pub input_schema: Value,
+    /// Whether the agent should end the run with this tool's result instead of
+    /// feeding it back to the model for another round.
+    ///
+    /// Providers never see this flag; it only drives the agent loop.
+    pub return_direct: bool,
 }
 
 impl ToolSpec {
-    /// Builds a spec from a name, a description and its JSON Schema.
+    /// Builds a spec from a name, a description and its JSON Schema, with
+    /// [`return_direct`](Self::return_direct) set to `false`.
     pub fn new(
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
@@ -32,7 +38,14 @@ impl ToolSpec {
             name: name.into(),
             description: description.into(),
             input_schema,
+            return_direct: false,
         }
+    }
+
+    /// Sets whether the agent ends the run with this tool's result.
+    pub fn with_return_direct(mut self, return_direct: bool) -> Self {
+        self.return_direct = return_direct;
+        self
     }
 }
 
@@ -126,6 +139,8 @@ pub struct ToolDefinition {
     pub schema: fn() -> Value,
     /// Deserializes the arguments, invokes the function and serializes the result.
     pub call: fn(Value) -> BoxFuture<'static, Result<String, Error>>,
+    /// Whether the agent ends the run with this tool's result.
+    pub return_direct: bool,
 }
 
 impl Tool for ToolDefinition {
@@ -134,6 +149,7 @@ impl Tool for ToolDefinition {
             name: Cow::Borrowed(self.name),
             description: Cow::Borrowed(self.description),
             input_schema: (self.schema)(),
+            return_direct: self.return_direct,
         }
     }
 
