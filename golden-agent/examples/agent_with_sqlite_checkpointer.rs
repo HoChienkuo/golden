@@ -1,6 +1,5 @@
 use golden_agent::{
-    Agent, ChatRequest, Context, DeepSeekLlm, DeepSeekModel, Message, ThreadId,
-    store::SqliteCheckpointer,
+    Agent, ChatRequest, Context, DeepSeekLlm, DeepSeekModel, Message, SqliteCheckpointer, ThreadId,
 };
 use sqlx::{Row, SqlitePool};
 

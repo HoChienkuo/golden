@@ -48,4 +48,8 @@ pub mod __private {
 pub use checkpointer::SqliteCheckpointer;
 pub use checkpointer::{CheckpointMessage, Checkpointer, InMemoryCheckpointer};
 
+#[cfg(feature = "persistence-sqlite")]
+pub use store::SqliteStore;
+pub use store::{InMemoryStore, Namespace, Store, StoreItem};
+
 pub use agent::{RunId, ThreadId};

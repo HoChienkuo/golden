@@ -58,6 +58,7 @@ streaming — live in
 - [x] String / prompt templates
 - [x] Structured output (`response_format` and typed parsing)
 - [x] Conversation history and context management (`Checkpointer`, InMemory and SQLite)
+- [x] Long-term memory (`Store` with `remember` / `recall` tools, InMemory and SQLite)
 - [x] Automatic tool-calling loop (agents)
 - [ ] History compaction and summarization (`compact` / `Summarizer`)
 - [ ] Stateful tools

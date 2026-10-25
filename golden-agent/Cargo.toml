@@ -1,6 +1,6 @@
 [package]
 name = "golden-agent"
-version = "0.1.6"
+version = "0.1.7"
 edition.workspace = true
 authors.workspace = true
 description = "An annotation-driven agent engineering framework for Rust"
@@ -77,3 +77,7 @@ path = "examples/llama_cpp.rs"
 [[example]]
 name = "ollama"
 path = "examples/ollama.rs"
+
+[[example]]
+name = "agent_with_store"
+path = "examples/agent_with_store.rs"

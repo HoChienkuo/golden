@@ -19,6 +19,8 @@ use crate::checkpointer::CheckpointMessage;
 use crate::checkpointer::Checkpointer;
 use crate::error::Error;
 use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Message, ToolCall};
+use crate::store::Store;
+use crate::store::{RecallTool, RememberTool};
 
 pub use context::Context;
 pub use metadata::{RunId, ThreadId};
@@ -84,6 +86,7 @@ pub struct Agent {
     middlewares: Vec<Arc<dyn Middleware>>,
     config: AgentConfig,
     checkpointer: Option<Arc<dyn Checkpointer>>,
+    store: Option<Arc<dyn Store>>,
 }
 
 impl Agent {
@@ -441,6 +444,11 @@ impl Agent {
     async fn persist_step(&self, state: &mut AgentState, cursor: &mut usize) -> Result<(), Error> {
         persist_step_stream(&self.checkpointer, state, cursor).await
     }
+
+    /// Returns the long-term store, if configured.
+    pub fn store(&self) -> Option<&Arc<dyn Store>> {
+        self.store.as_ref()
+    }
 }
 
 /// Whether the named tool is declared `return_direct`.
@@ -468,6 +476,7 @@ pub struct AgentBuilder {
     middlewares: Vec<Arc<dyn Middleware>>,
     config: AgentConfig,
     checkpointer: Option<Arc<dyn Checkpointer>>,
+    store: Option<Arc<dyn Store>>,
 }
 
 impl AgentBuilder {
@@ -528,15 +537,32 @@ impl AgentBuilder {
         self
     }
 
+    /// Enables long-term memory: stores `store` on the agent and registers the
+    /// `remember` / `recall` tools bound to it.
+    pub fn store(mut self, store: impl Store + 'static) -> Self {
+        self.store = Some(Arc::new(store));
+        self
+    }
+
     /// Builds the agent.
     ///
     /// Fails with [`Error::MissingSetting`] if the model or base request was not
     /// provided.
-    pub fn build(self) -> Result<Agent, Error> {
+    pub fn build(mut self) -> Result<Agent, Error> {
         let model = self.model.ok_or(Error::MissingSetting { name: "model" })?;
         let request = self
             .request
             .ok_or(Error::MissingSetting { name: "request" })?;
+
+        // Register the `remember` / `recall` tools when a store is configured.
+        if let Some(store) = self.store.clone() {
+            self.tools = self
+                .tools
+                .with_tool(RememberTool {
+                    store: Arc::clone(&store),
+                })
+                .with_tool(RecallTool { store });
+        }
 
         Ok(Agent {
             model,
@@ -546,6 +572,7 @@ impl AgentBuilder {
             middlewares: self.middlewares,
             config: self.config,
             checkpointer: self.checkpointer,
+            store: self.store,
         })
     }
 }
