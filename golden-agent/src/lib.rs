@@ -21,7 +21,8 @@ pub use llm::chat::{
     FinishReason, Message, ResponseFormat, Role, ToolCall, ToolChoice, Usage,
 };
 pub use llm::{
-    AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, HttpConfig, OpenAiLlm, OpenAiModel,
+    AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, HttpConfig, LlamaCppLlm, OllamaLlm,
+    OpenAiLlm, OpenAiModel,
 };
 pub use tool::{
     FromToolSpec, Tool, ToolDefinition, ToolSchema, ToolSpec, registered_tools, render_tools,

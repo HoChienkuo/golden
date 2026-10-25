@@ -68,3 +68,12 @@ path = "examples/agent_with_in_memory_checkpointer.rs"
 [[example]]
 name = "agent_with_sqlite_checkpointer"
 path = "examples/agent_with_sqlite_checkpointer.rs"
+required-features = ["persistence-sqlite"]
+
+[[example]]
+name = "llama_cpp"
+path = "examples/llama_cpp.rs"
+
+[[example]]
+name = "ollama"
+path = "examples/ollama.rs"

@@ -27,6 +27,11 @@ pub struct OpenAiLlm {
 
 impl OpenAiLlm {
     /// Constructs a client from a base URL and API key (no provider defaults).
+    /// Constructs with an explicit API key.
+    ///
+    /// An empty `api_key` omits the `Authorization` header entirely, for
+    /// local OpenAI-compatible servers (llama.cpp, Ollama, LM Studio) that
+    /// do not require authentication.
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
         let config = HttpConfig::default();
         Self {
@@ -64,16 +69,14 @@ impl ChatModel for OpenAiLlm {
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
         let body = translate::to_wire_request(request, false);
 
-        let response = self
-            .config
-            .bound(
-                self.http
-                    .post(self.endpoint("/chat/completions"))
-                    .bearer_auth(&self.api_key)
-                    .json(&body),
-            )
-            .send()
-            .await?;
+        let mut req = self
+            .http
+            .post(self.endpoint("/chat/completions"))
+            .json(&body);
+        if !self.api_key.is_empty() {
+            req = req.bearer_auth(&self.api_key);
+        }
+        let response = self.config.bound(req).send().await?;
 
         let status = response.status();
         if !status.is_success() {
@@ -93,13 +96,11 @@ impl ChatModel for OpenAiLlm {
         let url = self.endpoint("/chat/completions");
 
         Box::pin(async_stream::stream! {
-            let response = match http
-                .post(&url)
-                .bearer_auth(&api_key)
-                .json(&body)
-                .send()
-                .await
-            {
+            let mut req = http.post(&url).json(&body);
+            if !api_key.is_empty() {
+                req = req.bearer_auth(&api_key);
+            }
+            let response = match req.send().await {
                 Ok(response) => response,
                 Err(error) => { yield Err(Error::Request(error)); return; }
             };

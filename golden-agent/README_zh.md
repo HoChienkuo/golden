@@ -48,15 +48,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## 功能
 
 - [x] 流式 / 非流式对话
-- [x] OpenAI 兼容协议（OpenAI、DeepSeek）
+- [x] OpenAI 兼容协议（OpenAI、DeepSeek、llama.cpp、Ollama）
 - [x] `#[tool]` 工具声明、注册与按 provider 渲染
 - [x] Anthropic Messages API
 - [ ] Google Gemini API
-- [ ] Ollama
 - [x] 字符串模板 / prompt 模板
 - [x] 结构化输出（`response_format` 与类型化解析）
-- [ ] 会话历史与上下文管理
+- [x] 会话历史与上下文管理（`Checkpointer`，支持 InMemory 与 SQLite）
 - [x] 自动工具调用循环（Agent）
+- [ ] 历史压缩与摘要（`compact` / `Summarizer`）
 - [ ] 有状态工具
 - [ ] MCP 工具接入
 - [ ] Web 端点（HTTP / SSE）

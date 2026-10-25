@@ -51,15 +51,15 @@ streaming — live in
 ## Features
 
 - [x] Non-streaming and streaming chat
-- [x] OpenAI-compatible protocol (OpenAI, DeepSeek)
+- [x] OpenAI-compatible protocol (OpenAI, DeepSeek, llama.cpp, Ollama)
 - [x] `#[tool]` tool declaration, registration, and per-provider rendering
 - [x] Anthropic Messages API
 - [ ] Google Gemini API
-- [ ] Ollama
 - [x] String / prompt templates
 - [x] Structured output (`response_format` and typed parsing)
-- [ ] Conversation history and context management
+- [x] Conversation history and context management (`Checkpointer`, InMemory and SQLite)
 - [x] Automatic tool-calling loop (agents)
+- [ ] History compaction and summarization (`compact` / `Summarizer`)
 - [ ] Stateful tools
 - [ ] MCP tool sources
 - [ ] Web endpoints (HTTP / SSE)

@@ -132,11 +132,11 @@ impl Agent {
             state.context.insert(RunId(generate_id()));
         }
 
-        if let Some(cp) = &self.checkpointer {
-            if let Some(tid) = state.context.get::<ThreadId>() {
-                let loaded = cp.load(&tid.0).await?;
-                state.messages.extend(loaded.into_iter().map(Message::from));
-            }
+        if let Some(cp) = &self.checkpointer
+            && let Some(tid) = state.context.get::<ThreadId>()
+        {
+            let loaded = cp.load(&tid.0).await?;
+            state.messages.extend(loaded.into_iter().map(Message::from));
         }
 
         if let Some(prompt) = &self.system_prompt {
@@ -196,16 +196,16 @@ impl Agent {
                 state.context.insert(RunId(generate_id()));
             }
 
-            if let Some(cp) = &checkpointer {
-                if let Some(tid) = state.context.get::<ThreadId>() {
-                    match cp.load(&tid.0).await {
-                        Ok(loaded) => {
-                            state.messages.extend(loaded.into_iter().map(Message::from));
-                        }
-                        Err(error) => {
-                            yield Err(error);
-                            return;
-                        }
+            if let Some(cp) = &checkpointer
+                && let Some(tid) = state.context.get::<ThreadId>()
+            {
+                match cp.load(&tid.0).await {
+                    Ok(loaded) => {
+                        state.messages.extend(loaded.into_iter().map(Message::from));
+                    }
+                    Err(error) => {
+                        yield Err(error);
+                        return;
                     }
                 }
             }
