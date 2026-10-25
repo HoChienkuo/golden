@@ -8,6 +8,7 @@ extern crate self as golden_agent;
 pub mod agent;
 mod error;
 pub mod llm;
+pub mod store;
 pub mod tool;
 
 pub use agent::{
@@ -40,3 +41,7 @@ pub mod __private {
     pub use inventory;
     pub use serde_json;
 }
+
+pub use store::StoredMessage;
+
+pub use agent::{RunId, ThreadId};

@@ -1,6 +1,7 @@
 //! A ReAct-style agent that drives a chat model and its tools in a loop.
 
 mod context;
+mod metadata;
 mod middleware;
 mod prompt;
 mod result;
@@ -14,10 +15,13 @@ use std::sync::Arc;
 use futures_core::Stream;
 use futures_util::StreamExt;
 
+use crate::StoredMessage;
 use crate::error::Error;
 use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Message, ToolCall};
+use crate::store::Checkpointer;
 
 pub use context::Context;
+pub use metadata::{RunId, ThreadId};
 pub use middleware::{Middleware, ModelHandler, ToolHandler};
 pub use prompt::DynamicPrompt;
 pub use result::AgentResult;
@@ -79,6 +83,7 @@ pub struct Agent {
     system_prompt: Option<String>,
     middlewares: Vec<Arc<dyn Middleware>>,
     config: AgentConfig,
+    checkpointer: Option<Arc<dyn Checkpointer>>,
 }
 
 impl Agent {
@@ -121,13 +126,27 @@ impl Agent {
         context: Context,
     ) -> Result<AgentResult, Error> {
         let mut state = AgentState::new();
+        state.context = context;
+
+        if state.context.get::<RunId>().is_none() {
+            state.context.insert(RunId(generate_id()));
+        }
+
+        if let Some(cp) = &self.checkpointer {
+            if let Some(tid) = state.context.get::<ThreadId>() {
+                let loaded = cp.load(&tid.0).await?;
+                state.messages.extend(loaded.into_iter().map(Message::from));
+            }
+        }
+
         if let Some(prompt) = &self.system_prompt {
             state.messages.push(Message::system(prompt.clone()));
         }
-        state.messages.extend(messages);
-        state.context = context;
 
-        self.run(&mut state).await?;
+        let mut cursor = state.messages.len();
+        state.messages.extend(messages);
+
+        self.run(&mut state, &mut cursor).await?;
         Ok(AgentResult::new(state))
     }
 
@@ -167,14 +186,36 @@ impl Agent {
         let request = self.request.clone();
         let config = self.config.clone();
         let model = Arc::clone(&self.model);
+        let checkpointer = self.checkpointer.clone();
 
         Box::pin(async_stream::stream! {
             let mut state = AgentState::new();
+            state.context = context;
+
+            if state.context.get::<RunId>().is_none() {
+                state.context.insert(RunId(generate_id()));
+            }
+
+            if let Some(cp) = &checkpointer {
+                if let Some(tid) = state.context.get::<ThreadId>() {
+                    match cp.load(&tid.0).await {
+                        Ok(loaded) => {
+                            state.messages.extend(loaded.into_iter().map(Message::from));
+                        }
+                        Err(error) => {
+                            yield Err(error);
+                            return;
+                        }
+                    }
+                }
+            }
+
             if let Some(prompt) = &system_prompt {
                 state.messages.push(Message::system(prompt.clone()));
             }
+
+            let mut cursor = state.messages.len();
             state.messages.extend(input);
-            state.context = context;
 
             for middleware in &middlewares {
                 if let Err(error) = middleware.before_agent(&mut state).await {
@@ -233,6 +274,12 @@ impl Agent {
                 }
 
                 if tool_calls.is_empty() {
+                    if let Err(error) = persist_step_stream(
+                        &checkpointer, &state, &mut cursor,
+                    ).await {
+                        yield Err(error);
+                        return;
+                    }
                     for middleware in &middlewares {
                         if let Err(error) = middleware.after_agent(&mut state).await {
                             yield Err(error);
@@ -268,6 +315,14 @@ impl Agent {
                     });
                 }
 
+                if let Err(error) = persist_step_stream(
+                    &checkpointer, &state, &mut cursor,
+                ).await {
+                    yield Err(error);
+                    return;
+                }
+
+
                 steps += 1;
 
                 // A `return_direct` tool's result is the final answer: echo it
@@ -277,6 +332,12 @@ impl Agent {
                     state
                         .messages
                         .push(Message::assistant(direct_answer(&content)));
+                    if let Err(error) = persist_step_stream(
+                        &checkpointer, &state, &mut cursor,
+                    ).await {
+                        yield Err(error);
+                        return;
+                    }
                     for middleware in &middlewares {
                         if let Err(error) = middleware.after_agent(&mut state).await {
                             yield Err(error);
@@ -295,7 +356,7 @@ impl Agent {
         &self.tools
     }
 
-    async fn run(&self, state: &mut AgentState) -> Result<(), Error> {
+    async fn run(&self, state: &mut AgentState, cursor: &mut usize) -> Result<(), Error> {
         for middleware in &self.middlewares {
             middleware.before_agent(state).await?;
         }
@@ -323,6 +384,8 @@ impl Agent {
             }
 
             if response.message.tool_calls.is_empty() {
+                // persist if last
+                self.persist_step(state, cursor).await?;
                 break;
             }
 
@@ -351,9 +414,11 @@ impl Agent {
                 state
                     .messages
                     .push(Message::assistant(direct_answer(&content)));
+                self.persist_step(state, cursor).await?;
                 break;
             }
 
+            self.persist_step(state, cursor).await?;
             steps += 1;
         }
 
@@ -370,6 +435,11 @@ impl Agent {
         request.messages = state.messages.clone();
         request.tools = self.tools.specs();
         request
+    }
+
+    /// Persists messages produced since `cursor` and advances it.
+    async fn persist_step(&self, state: &mut AgentState, cursor: &mut usize) -> Result<(), Error> {
+        persist_step_stream(&self.checkpointer, state, cursor).await
     }
 }
 
@@ -397,6 +467,7 @@ pub struct AgentBuilder {
     system_prompt: Option<String>,
     middlewares: Vec<Arc<dyn Middleware>>,
     config: AgentConfig,
+    checkpointer: Option<Arc<dyn Checkpointer>>,
 }
 
 impl AgentBuilder {
@@ -451,6 +522,12 @@ impl AgentBuilder {
         self
     }
 
+    /// Sets the checkpointer that persists and restores conversation history.
+    pub fn checkpointer(mut self, cp: impl Checkpointer + 'static) -> Self {
+        self.checkpointer = Some(Arc::new(cp));
+        self
+    }
+
     /// Builds the agent.
     ///
     /// Fails with [`Error::MissingSetting`] if the model or base request was not
@@ -468,6 +545,47 @@ impl AgentBuilder {
             system_prompt: self.system_prompt,
             middlewares: self.middlewares,
             config: self.config,
+            checkpointer: self.checkpointer,
         })
     }
+}
+
+/// Generates a run id. Currently a uuid v7; may be swapped for a shorter id.
+fn generate_id() -> String {
+    uuid::Uuid::now_v7().to_string()
+}
+
+/// Persists messages produced since `cursor` and advances it. Stream-friendly
+/// variant that returns `Result` for `yield Err(e)` at the call site.
+async fn persist_step_stream(
+    checkpointer: &Option<Arc<dyn Checkpointer>>,
+    state: &AgentState,
+    cursor: &mut usize,
+) -> Result<(), Error> {
+    let Some(cp) = checkpointer else {
+        *cursor = state.messages.len();
+        return Ok(());
+    };
+    let Some(tid) = state.context.get::<ThreadId>().cloned() else {
+        *cursor = state.messages.len();
+        return Ok(());
+    };
+    let run_id = state
+        .context
+        .get::<RunId>()
+        .cloned()
+        .unwrap_or_else(|| RunId(generate_id()));
+
+    if *cursor >= state.messages.len() {
+        return Ok(());
+    }
+
+    let stored: Vec<StoredMessage> = state.messages[*cursor..]
+        .iter()
+        .map(|m| StoredMessage::from_message(m, &tid.0, &run_id.0))
+        .collect();
+
+    cp.append(&tid.0, stored).await?;
+    *cursor = state.messages.len();
+    Ok(())
 }

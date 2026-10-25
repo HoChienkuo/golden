@@ -3,6 +3,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures_core::Stream;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::Error;
@@ -37,7 +38,8 @@ pub trait ChatModel: Send + Sync {
 }
 
 /// The role of a message author.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     /// A system instruction.
     System,
@@ -53,7 +55,8 @@ pub enum Role {
 ///
 /// Content is either a plain string ([`Content::Text`]) or a list of typed parts
 /// ([`Content::Parts`]) used for multimodal inputs.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Content {
     /// Plain text content.
     Text(String),
@@ -92,7 +95,8 @@ impl From<&str> for Content {
 }
 
 /// A single typed part of a multimodal message.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ContentPart {
     /// A text part.
     Text {
@@ -110,7 +114,7 @@ pub enum ContentPart {
 ///
 /// `arguments` is the JSON-encoded argument object, matching what OpenAI sends
 /// and what Anthropic's structured `input` serializes to.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     /// The id of the tool call, referenced by the matching tool message.
     pub id: String,
@@ -142,7 +146,7 @@ impl PartialToolCall {
 }
 
 /// A single message in a chat conversation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     /// The role of the message author.
     pub role: Role,

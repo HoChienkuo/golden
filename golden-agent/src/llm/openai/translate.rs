@@ -79,8 +79,13 @@ fn to_wire_message(message: &Message) -> WireMessage {
     let mut wire = match message.role {
         Role::System => WireMessage::system(message.text()),
         Role::User => WireMessage::user(to_wire_content(&message.content)),
-        Role::Assistant => WireMessage::assistant(message.text())
-            .tool_calls(message.tool_calls.iter().map(to_wire_tool_call)),
+        Role::Assistant => {
+            let mut wire = WireMessage::assistant(message.text());
+            if !message.tool_calls.is_empty() {
+                wire = wire.tool_calls(message.tool_calls.iter().map(to_wire_tool_call));
+            }
+            wire
+        }
         Role::Tool => WireMessage::tool(
             message.tool_call_id.clone().unwrap_or_default(),
             message.text(),

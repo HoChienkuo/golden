@@ -20,6 +20,14 @@ async-trait.workspace = true
 async-stream.workspace = true
 inventory.workspace = true
 golden-macros = { path = "../golden-macros", features = ["agent"] }
+sqlx = { workspace = true, optional = true}
+uuid.workspace = true
+
+[features]
+default = []
+persistence-sqlite = ["dep:sqlx", "sqlx/sqlite"]
+persistence-mysql = ["dep:sqlx", "sqlx/mysql"]
+persistence-postgres = ["dep:sqlx", "sqlx/postgres"]
 
 [[example]]
 name = "agent"
@@ -52,3 +60,11 @@ path = "examples/tools.rs"
 [[example]]
 name = "structured_output"
 path = "examples/structured_output.rs"
+
+[[example]]
+name = "agent_with_in_memory_checkpointer"
+path = "examples/agent_with_in_memory_checkpointer.rs"
+
+[[example]]
+name = "agent_with_sqlite_checkpointer"
+path = "examples/agent_with_sqlite_checkpointer.rs"

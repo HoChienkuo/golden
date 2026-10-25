@@ -62,3 +62,12 @@ futures-util = "0.3"
 bytes = "1"
 async-trait = "0.1"
 async-stream = "0.3"
+sqlx = {
+    version = "0.9",
+    default-features = false,
+    features = ["runtime-tokio", "macros"]
+}
+uuid = {
+    version = "1",
+    features = ["v7"]
+}

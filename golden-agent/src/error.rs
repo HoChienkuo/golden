@@ -70,6 +70,20 @@ pub enum Error {
         /// The raw response text that failed to parse.
         raw: String,
     },
+
+    /// The operation is not supported by this implementation.
+    #[error("{operation} is not supported")]
+    Unsupported {
+        /// The unsupported operation name.
+        operation: &'static str,
+    },
+
+    /// A persistence backend failed (SQL, serialization, or schema violation).
+    #[error("persistence error: {message}")]
+    Persistence {
+        /// The error message.
+        message: String,
+    },
 }
 
 /// The OpenAI-style error response body.
