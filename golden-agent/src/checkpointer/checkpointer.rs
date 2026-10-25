@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
-use crate::{Error, StoredMessage};
+use crate::Error;
+use crate::checkpointer::CheckpointMessage;
 
 #[async_trait]
 pub trait Checkpointer: Send + Sync {
@@ -8,17 +9,17 @@ pub trait Checkpointer: Send + Sync {
     ///
     /// Returns rows with `is_context = true`, ordered by `(created_at, seq)`
     /// ascending. Returns an empty `Vec` for an unknown thread.
-    async fn load(&self, thread_id: &str) -> Result<Vec<StoredMessage>, Error>;
+    async fn load(&self, thread_id: &str) -> Result<Vec<CheckpointMessage>, Error>;
 
     /// Persists new messages for a thread.
     ///
     /// Implementations assign the real `seq` values (strictly increasing per
     /// thread) and ignore the `seq` field of each input row. The `id` field
     /// must be preserved: it is referenced by [`Self::compact`] and by
-    /// [`StoredMessage::summary_of`].
+    /// [`CheckpointMessage::summary_of`].
     ///
     /// Appending must be atomic: either every row is written, or none.
-    async fn append(&self, thread_id: &str, messages: Vec<StoredMessage>) -> Result<(), Error>;
+    async fn append(&self, thread_id: &str, messages: Vec<CheckpointMessage>) -> Result<(), Error>;
 
     /// Hides a range of messages and inserts a summary covering them.
     ///
@@ -34,6 +35,6 @@ pub trait Checkpointer: Send + Sync {
         &self,
         thread_id: &str,
         ids: &[String],
-        summary: StoredMessage,
+        summary: CheckpointMessage,
     ) -> Result<(), Error>;
 }

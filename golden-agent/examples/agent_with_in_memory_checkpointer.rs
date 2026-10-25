@@ -1,6 +1,6 @@
 use golden_agent::{
-    Agent, ChatRequest, Context, DeepSeekLlm, DeepSeekModel, Message, ThreadId,
-    store::InMemoryCheckpointer,
+    Agent, ChatRequest, Context, DeepSeekLlm, DeepSeekModel, InMemoryCheckpointer, Message,
+    ThreadId,
 };
 
 #[tokio::main]

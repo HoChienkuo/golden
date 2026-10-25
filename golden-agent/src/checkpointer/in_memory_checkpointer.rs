@@ -2,7 +2,8 @@ use std::{collections::HashMap, sync::Mutex};
 
 use async_trait::async_trait;
 
-use crate::{Error, StoredMessage, store::checkpointer::Checkpointer};
+use crate::Error;
+use crate::checkpointer::{CheckpointMessage, Checkpointer};
 
 #[derive(Debug, Default)]
 pub struct InMemoryCheckpointer {
@@ -11,7 +12,7 @@ pub struct InMemoryCheckpointer {
 
 #[derive(Debug, Default)]
 struct ThreadState {
-    messages: Vec<StoredMessage>,
+    messages: Vec<CheckpointMessage>,
     next_seq: u64,
 }
 
@@ -24,12 +25,12 @@ impl InMemoryCheckpointer {
 
 #[async_trait]
 impl Checkpointer for InMemoryCheckpointer {
-    async fn load(&self, thread_id: &str) -> Result<Vec<StoredMessage>, Error> {
+    async fn load(&self, thread_id: &str) -> Result<Vec<CheckpointMessage>, Error> {
         let threads = self.threads.lock().expect("mutex poisoned");
         let Some(state) = threads.get(thread_id) else {
             return Ok(Vec::new());
         };
-        let mut visible: Vec<StoredMessage> = state
+        let mut visible: Vec<CheckpointMessage> = state
             .messages
             .iter()
             .filter(|m| m.is_context)
@@ -39,7 +40,7 @@ impl Checkpointer for InMemoryCheckpointer {
         Ok(visible)
     }
 
-    async fn append(&self, thread_id: &str, messages: Vec<StoredMessage>) -> Result<(), Error> {
+    async fn append(&self, thread_id: &str, messages: Vec<CheckpointMessage>) -> Result<(), Error> {
         let mut threads = self.threads.lock().expect("mutex posioned");
         let state = threads.entry(thread_id.to_string()).or_default();
         for mut message in messages {
@@ -55,7 +56,7 @@ impl Checkpointer for InMemoryCheckpointer {
         &self,
         _thread_id: &str,
         _ids: &[String],
-        _summary: StoredMessage,
+        _summary: CheckpointMessage,
     ) -> Result<(), Error> {
         Err(Error::Unsupported {
             operation: "compact",

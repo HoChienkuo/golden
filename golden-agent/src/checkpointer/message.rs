@@ -5,11 +5,11 @@ use crate::llm::chat::{Content, Message, Role, ToolCall};
 /// A persisted message with its metadata.
 ///
 /// One row in the `messages` table. The provider-neutral [`Message`] is what
-/// the model sees; [`StoredMessage`] wraps it with the metadata persistence
+/// the model sees; [`CheckpointMessage`] wraps it with the metadata persistence
 /// needs: identity, ordering, and the two flags that drive context
 /// visibility and summarization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StoredMessage {
+pub struct CheckpointMessage {
     /// The unique id of this record (uuid v7 / ulid).
     ///
     /// Immutable. Referenced by [`Self::summary_of`] and used to identify
@@ -70,7 +70,7 @@ pub struct StoredMessage {
     pub summary_of: Option<Vec<String>>,
 }
 
-impl StoredMessage {
+impl CheckpointMessage {
     /// Wraps a plain message with its persistence metadata.
     ///
     /// `is_summary` is `false` and `summary_of` is `None`. Callers assign
@@ -154,12 +154,12 @@ impl StoredMessage {
     }
 }
 
-impl From<StoredMessage> for Message {
+impl From<CheckpointMessage> for Message {
     /// Extracts the model-facing message.
     ///
     /// The persistence metadata (`id`, `run_id`, `seq`, `created_at`,
     /// `is_context`, `is_summary`, `summary_of`) is dropped.
-    fn from(stored: StoredMessage) -> Self {
+    fn from(stored: CheckpointMessage) -> Self {
         Message {
             role: stored.role,
             content: stored.content,

@@ -15,10 +15,10 @@ use std::sync::Arc;
 use futures_core::Stream;
 use futures_util::StreamExt;
 
-use crate::StoredMessage;
+use crate::checkpointer::CheckpointMessage;
+use crate::checkpointer::Checkpointer;
 use crate::error::Error;
 use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Message, ToolCall};
-use crate::store::Checkpointer;
 
 pub use context::Context;
 pub use metadata::{RunId, ThreadId};
@@ -580,9 +580,9 @@ async fn persist_step_stream(
         return Ok(());
     }
 
-    let stored: Vec<StoredMessage> = state.messages[*cursor..]
+    let stored: Vec<CheckpointMessage> = state.messages[*cursor..]
         .iter()
-        .map(|m| StoredMessage::from_message(m, &tid.0, &run_id.0))
+        .map(|m| CheckpointMessage::from_message(m, &tid.0, &run_id.0))
         .collect();
 
     cp.append(&tid.0, stored).await?;

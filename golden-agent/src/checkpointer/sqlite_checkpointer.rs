@@ -1,10 +1,8 @@
 use crate::Error;
-use crate::store::Checkpointer;
-use crate::{Role, StoredMessage};
+use crate::Role;
+use crate::checkpointer::{CheckpointMessage, Checkpointer};
 use async_trait::async_trait;
-use sqlx::FromRow;
-use sqlx::QueryBuilder;
-use sqlx::sqlite::SqlitePool;
+use sqlx::{FromRow, QueryBuilder, sqlite::SqlitePool};
 
 const DDL: &str = include_str!("sqlite_messages.sql");
 
@@ -65,7 +63,7 @@ struct MessageRow {
     summary_of: Option<String>,
 }
 
-fn row_to_message(row: MessageRow) -> Result<StoredMessage, Error> {
+fn row_to_message(row: MessageRow) -> Result<CheckpointMessage, Error> {
     let MessageRow {
         id,
         thread_id,
@@ -80,7 +78,7 @@ fn row_to_message(row: MessageRow) -> Result<StoredMessage, Error> {
         is_summary,
         summary_of,
     } = row;
-    Ok(StoredMessage {
+    Ok(CheckpointMessage {
         id,
         thread_id,
         run_id,
@@ -139,7 +137,7 @@ async fn next_seq(
 
 async fn insert_message(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    message: &StoredMessage,
+    message: &CheckpointMessage,
 ) -> Result<(), Error> {
     sqlx::query(
         r#"
@@ -177,7 +175,7 @@ async fn insert_message(
 
 #[async_trait]
 impl Checkpointer for SqliteCheckpointer {
-    async fn load(&self, thread_id: &str) -> Result<Vec<StoredMessage>, Error> {
+    async fn load(&self, thread_id: &str) -> Result<Vec<CheckpointMessage>, Error> {
         let rows = sqlx::query_as::<_, MessageRow>(
             r#"
             SELECT id, thread_id, run_id, seq, role, content,
@@ -198,7 +196,7 @@ impl Checkpointer for SqliteCheckpointer {
             .collect::<Result<Vec<_>, _>>()
     }
 
-    async fn append(&self, thread_id: &str, messages: Vec<StoredMessage>) -> Result<(), Error> {
+    async fn append(&self, thread_id: &str, messages: Vec<CheckpointMessage>) -> Result<(), Error> {
         if messages.is_empty() {
             return Ok(());
         }
@@ -221,7 +219,7 @@ impl Checkpointer for SqliteCheckpointer {
         &self,
         thread_id: &str,
         ids: &[String],
-        summary: StoredMessage,
+        summary: CheckpointMessage,
     ) -> Result<(), Error> {
         // ── 校验入参 ────────────────────────────────────────────────
         if ids.is_empty() {

@@ -6,6 +6,7 @@
 extern crate self as golden_agent;
 
 pub mod agent;
+pub mod checkpointer;
 mod error;
 pub mod llm;
 pub mod store;
@@ -43,6 +44,8 @@ pub mod __private {
     pub use serde_json;
 }
 
-pub use store::StoredMessage;
+#[cfg(feature = "persistence-sqlite")]
+pub use checkpointer::SqliteCheckpointer;
+pub use checkpointer::{CheckpointMessage, Checkpointer, InMemoryCheckpointer};
 
 pub use agent::{RunId, ThreadId};
