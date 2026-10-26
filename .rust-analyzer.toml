@@ -1,2 +1,2 @@
 [cargo]
-features = ["persistence-sqlite"]
+features = ["persistence-sqlite", "persistence-mysql", "persistence-postgres"]

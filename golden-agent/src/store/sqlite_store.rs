@@ -1,15 +1,15 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use sqlx::FromRow;
 use sqlx::sqlite::SqlitePool;
 
 use crate::Error;
+use crate::store::ns::decode_namespace;
+use crate::store::sql_common::{
+    ItemRow, encode, persistence, prefix_like, row_to_item, value_json,
+};
 use crate::store::{Namespace, Store, StoreItem};
 
 const DDL: &str = include_str!("sqlite_store.sql");
-
-/// The separator used to flatten a [`Namespace`] into a single column value.
-const SEP: char = '/';
 
 /// A SQLite-backed [`Store`], gated on the `persistence-sqlite` feature.
 pub struct SqliteStore {
@@ -47,80 +47,6 @@ impl SqliteStore {
     }
 }
 
-/// Maps any displayable error into [`Error::Persistence`].
-fn persistence(err: impl std::fmt::Display) -> Error {
-    Error::Persistence {
-        message: err.to_string(),
-    }
-}
-
-/// Flattens a namespace into a length-prefixed, `/`-joined string.
-fn encode_namespace(namespace: &[String]) -> String {
-    namespace
-        .iter()
-        .map(|segment| format!("{}:{segment}", segment.len()))
-        .collect::<Vec<_>>()
-        .join(&SEP.to_string())
-}
-
-/// Reverses [`encode_namespace`].
-fn decode_namespace(encoded: &str) -> Result<Namespace, Error> {
-    if encoded.is_empty() {
-        return Ok(Vec::new());
-    }
-    encoded
-        .split(SEP)
-        .map(|part| {
-            let (len, rest) = part
-                .split_once(':')
-                .ok_or_else(|| persistence(format!("malformed namespace segment: {part}")))?;
-            let len: usize = len
-                .parse()
-                .map_err(|_| persistence(format!("malformed namespace length: {len}")))?;
-            if rest.len() != len {
-                return Err(persistence(format!(
-                    "namespace segment length mismatch: {part}"
-                )));
-            }
-            Ok(rest.to_string())
-        })
-        .collect()
-}
-
-/// Returns the LIKE pattern matching `prefix` and any deeper namespace.
-fn prefix_like(prefix: &[String]) -> String {
-    if prefix.is_empty() {
-        return "%".to_string();
-    }
-    // Escape LIKE metacharacters in the encoded prefix, then append a wildcard
-    // to match any deeper namespace.
-    let encoded = encode_namespace(prefix);
-    let escaped = encoded
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
-    format!("{escaped}%")
-}
-
-#[derive(FromRow)]
-struct ItemRow {
-    namespace: String,
-    key: String,
-    value: String,
-    created_at: i64,
-    updated_at: i64,
-}
-
-fn row_to_item(row: ItemRow) -> Result<StoreItem, Error> {
-    Ok(StoreItem {
-        namespace: decode_namespace(&row.namespace)?,
-        key: row.key,
-        value: serde_json::from_str(&row.value).map_err(persistence)?,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    })
-}
-
 /// Returns the current unix time in seconds, or 0 if the clock is before epoch.
 fn now() -> i64 {
     std::time::SystemTime::now()
@@ -140,7 +66,7 @@ impl Store for SqliteStore {
         let timestamp = now();
 
         for (namespace, key, value) in items {
-            let ns = encode_namespace(&namespace);
+            let ns = encode(&namespace);
             // Upsert: preserve created_at on conflict, refresh value/updated_at.
             sqlx::query(
                 r#"
@@ -153,7 +79,7 @@ impl Store for SqliteStore {
             )
             .bind(&ns)
             .bind(&key)
-            .bind(serde_json::to_string(&value).map_err(persistence)?)
+            .bind(value_json(&value)?)
             .bind(timestamp)
             .bind(timestamp)
             .execute(&mut *tx)
@@ -173,7 +99,7 @@ impl Store for SqliteStore {
             WHERE namespace = ? AND key = ?
             "#,
         )
-        .bind(encode_namespace(namespace))
+        .bind(encode(namespace))
         .bind(key)
         .fetch_optional(&self.pool)
         .await
@@ -209,7 +135,7 @@ impl Store for SqliteStore {
 
     async fn delete(&self, namespace: &Namespace, key: &str) -> Result<(), Error> {
         sqlx::query("DELETE FROM store_items WHERE namespace = ? AND key = ?")
-            .bind(encode_namespace(namespace))
+            .bind(encode(namespace))
             .bind(key)
             .execute(&self.pool)
             .await

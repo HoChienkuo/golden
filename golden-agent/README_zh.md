@@ -54,8 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [ ] Google Gemini API
 - [x] 字符串模板 / prompt 模板
 - [x] 结构化输出（`response_format` 与类型化解析）
-- [x] 会话历史与上下文管理（`Checkpointer`，支持 InMemory 与 SQLite）
-- [x] 长期记忆（`Store` 与 `remember` / `recall` 工具，支持 InMemory 与 SQLite）
+- [x] 会话历史与上下文管理（`Checkpointer`，支持 InMemory / SQLite / MySQL / PostgreSQL）
+- [x] 长期记忆（`Store` 与 `remember` / `recall` 工具，支持 InMemory / SQLite / MySQL / PostgreSQL）
 - [x] 自动工具调用循环（Agent）
 - [ ] 历史压缩与摘要（`compact` / `Summarizer`）
 - [ ] 有状态工具

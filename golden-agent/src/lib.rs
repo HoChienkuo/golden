@@ -44,9 +44,21 @@ pub mod __private {
     pub use serde_json;
 }
 
+#[cfg(feature = "persistence-mysql")]
+pub use checkpointer::MySqlCheckpointer;
+
+#[cfg(feature = "persistence-postgres")]
+pub use checkpointer::PostgresCheckpointer;
+
 #[cfg(feature = "persistence-sqlite")]
 pub use checkpointer::SqliteCheckpointer;
 pub use checkpointer::{CheckpointMessage, Checkpointer, InMemoryCheckpointer};
+
+#[cfg(feature = "persistence-mysql")]
+pub use store::MySqlStore;
+
+#[cfg(feature = "persistence-postgres")]
+pub use store::PostgresStore;
 
 #[cfg(feature = "persistence-sqlite")]
 pub use store::SqliteStore;

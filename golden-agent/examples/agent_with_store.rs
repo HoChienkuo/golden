@@ -1,7 +1,4 @@
-
-use golden_agent::{
-    Agent, ChatRequest, DeepSeekLlm, DeepSeekModel, InMemoryStore, Message,
-};
+use golden_agent::{Agent, ChatRequest, DeepSeekLlm, DeepSeekModel, InMemoryStore, Message};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

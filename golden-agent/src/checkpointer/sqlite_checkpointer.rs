@@ -1,11 +1,17 @@
-use crate::Error;
-use crate::Role;
-use crate::checkpointer::{CheckpointMessage, Checkpointer};
 use async_trait::async_trait;
-use sqlx::{FromRow, QueryBuilder, sqlite::SqlitePool};
+use sqlx::QueryBuilder;
+use sqlx::sqlite::SqlitePool;
+
+use crate::Error;
+use crate::checkpointer::sql_common::{
+    MessageRow, content_json, flag, persistence, role_str, row_to_message, summary_of_json,
+    tool_calls_json, validate_compact,
+};
+use crate::checkpointer::{CheckpointMessage, Checkpointer};
 
 const DDL: &str = include_str!("sqlite_messages.sql");
 
+/// A SQLite-backed [`Checkpointer`], gated on the `persistence-sqlite` feature.
 pub struct SqliteCheckpointer {
     pool: SqlitePool,
 }
@@ -25,6 +31,7 @@ impl SqliteCheckpointer {
         Ok(Self::new(pool))
     }
 
+    /// Creates the `messages` table and index if they do not exist.
     pub async fn migrate(&self) -> Result<(), Error> {
         for stmt in DDL.split(';') {
             let stmt = stmt.trim();
@@ -37,87 +44,6 @@ impl SqliteCheckpointer {
                 .map_err(persistence)?;
         }
         Ok(())
-    }
-}
-
-/// Maps any displayable error into [`Error::Persistence`].
-fn persistence(err: impl std::fmt::Display) -> Error {
-    Error::Persistence {
-        message: err.to_string(),
-    }
-}
-
-#[derive(FromRow)]
-struct MessageRow {
-    id: String,
-    thread_id: String,
-    run_id: String,
-    seq: i64,
-    role: String,
-    content: String,
-    tool_calls: Option<String>,
-    tool_call_id: Option<String>,
-    created_at: i64,
-    is_context: i64,
-    is_summary: i64,
-    summary_of: Option<String>,
-}
-
-fn row_to_message(row: MessageRow) -> Result<CheckpointMessage, Error> {
-    let MessageRow {
-        id,
-        thread_id,
-        run_id,
-        seq,
-        role,
-        content,
-        tool_calls,
-        tool_call_id,
-        created_at,
-        is_context,
-        is_summary,
-        summary_of,
-    } = row;
-    Ok(CheckpointMessage {
-        id,
-        thread_id,
-        run_id,
-        seq: seq as u64,
-        role: parse_role(&role)?,
-        content: serde_json::from_str(&content).map_err(persistence)?,
-        tool_calls: match tool_calls {
-            Some(json) => serde_json::from_str(&json).map_err(persistence)?,
-            None => Vec::new(),
-        },
-        tool_call_id,
-        created_at,
-        is_context: is_context != 0,
-        is_summary: is_summary != 0,
-        summary_of: match summary_of {
-            Some(json) => Some(serde_json::from_str(&json).map_err(persistence)?),
-            None => None,
-        },
-    })
-}
-
-fn parse_role(s: &str) -> Result<Role, Error> {
-    match s {
-        "system" => Ok(Role::System),
-        "user" => Ok(Role::User),
-        "assistant" => Ok(Role::Assistant),
-        "tool" => Ok(Role::Tool),
-        other => Err(Error::Persistence {
-            message: format!("unknown role: {other}"),
-        }),
-    }
-}
-
-fn role_str(role: Role) -> &'static str {
-    match role {
-        Role::System => "system",
-        Role::User => "user",
-        Role::Assistant => "assistant",
-        Role::Tool => "tool",
     }
 }
 
@@ -153,21 +79,14 @@ async fn insert_message(
     .bind(&message.run_id)
     .bind(message.seq as i64)
     .bind(role_str(message.role))
-    .bind(serde_json::to_string(&message.content).map_err(persistence)?)
-    .bind(serde_json::to_string(&message.tool_calls).map_err(persistence)?)
+    .bind(content_json(message)?)
+    .bind(tool_calls_json(message)?)
     .bind(&message.tool_call_id)
     .bind(message.created_at)
-    .bind(message.is_context as i64)
-    .bind(message.is_summary as i64)
-    .bind(
-        message
-            .summary_of
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(persistence)?,
-    )
-    .execute(&mut **tx) // ← &mut **tx
+    .bind(flag(message.is_context))
+    .bind(flag(message.is_summary))
+    .bind(summary_of_json(message)?)
+    .execute(&mut **tx)
     .await
     .map_err(persistence)?;
     Ok(())
@@ -221,25 +140,12 @@ impl Checkpointer for SqliteCheckpointer {
         ids: &[String],
         summary: CheckpointMessage,
     ) -> Result<(), Error> {
-        // ── 校验入参 ────────────────────────────────────────────────
-        if ids.is_empty() {
-            return Err(Error::Persistence {
-                message: "compact: ids must not be empty".to_string(),
-            });
-        }
+        validate_compact(ids, &summary)?;
 
-        // 不变量：摘要必须 is_summary=true 且 is_context=true
-        if !summary.is_summary || !summary.is_context {
-            return Err(Error::Persistence {
-                message: "compact: summary must have is_summary = true and is_context = true"
-                    .to_string(),
-            });
-        }
-
-        // ── 事务开始 ────────────────────────────────────────────────
         let mut tx = self.pool.begin().await.map_err(persistence)?;
 
-        // ① 隐藏被覆盖的消息（用 QueryBuilder 安全构造动态 IN 子句）
+        // Hide the covered messages. The `IN` list is built from binds, so no
+        // id can alter the statement.
         let mut qb = QueryBuilder::new("UPDATE messages SET is_context = 0 WHERE thread_id = ");
         qb.push_bind(thread_id);
         qb.push(" AND id IN (");
@@ -252,30 +158,24 @@ impl Checkpointer for SqliteCheckpointer {
         qb.push(")");
         let result = qb.build().execute(&mut *tx).await.map_err(persistence)?;
 
-        // ② 校验：所有 ids 都真的存在（防止传错 id 导致静默丢失）
+        // Every id must have matched; otherwise a typo would silently drop
+        // messages from the covered range.
         if result.rows_affected() != ids.len() as u64 {
-            return Err(Error::Persistence {
-                message: format!(
-                    "compact: expected to hide {} rows, hid {}",
-                    ids.len(),
-                    result.rows_affected()
-                ),
-            });
+            return Err(persistence(format!(
+                "compact: expected to hide {} rows, hid {}",
+                ids.len(),
+                result.rows_affected()
+            )));
         }
 
-        // ③ 准备摘要：强制覆盖 thread_id / summary_of / seq
+        // The summary covers exactly `ids` and takes the next sequence slot.
         let mut summary = summary;
         summary.thread_id = thread_id.to_string();
-        summary.summary_of = Some(ids.to_vec()); // 强制等于传入的 ids
-        summary.seq = next_seq(&mut tx, thread_id).await?; // ← 分配新 seq
+        summary.summary_of = Some(ids.to_vec());
+        summary.seq = next_seq(&mut tx, thread_id).await?;
 
-        // summary.created_at 由调用方设置（= 最后一条被覆盖消息的 created_at）
-        // 这里可以做防御性校验，也可以信任调用方
-
-        // ④ 插入摘要
         insert_message(&mut tx, &summary).await?;
 
-        // ── 提交 ────────────────────────────────────────────────────
         tx.commit().await.map_err(persistence)?;
         Ok(())
     }
