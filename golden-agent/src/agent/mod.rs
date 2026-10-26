@@ -18,7 +18,7 @@ use futures_util::StreamExt;
 use crate::checkpointer::CheckpointMessage;
 use crate::checkpointer::Checkpointer;
 use crate::error::Error;
-use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Message, ToolCall};
+use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Content, Message, Role, ToolCall};
 use crate::store::Store;
 use crate::store::{RecallTool, RememberTool};
 
@@ -143,7 +143,7 @@ impl Agent {
         }
 
         if let Some(prompt) = &self.system_prompt {
-            state.messages.push(Message::system(prompt.clone()));
+            apply_system_prompt(&mut state.messages, prompt);
         }
 
         let mut cursor = state.messages.len();
@@ -214,7 +214,7 @@ impl Agent {
             }
 
             if let Some(prompt) = &system_prompt {
-                state.messages.push(Message::system(prompt.clone()));
+                apply_system_prompt(&mut state.messages, prompt);
             }
 
             let mut cursor = state.messages.len();
@@ -448,6 +448,22 @@ impl Agent {
     /// Returns the long-term store, if configured.
     pub fn store(&self) -> Option<&Arc<dyn Store>> {
         self.store.as_ref()
+    }
+}
+
+/// Installs the configured system prompt as the first message of `messages`.
+///
+/// The system prompt always leads the conversation, so it is placed at index 0
+/// rather than appended after the history loaded from a
+/// [`Checkpointer`](crate::Checkpointer). A leading system message that is
+/// already present is replaced in place, so a second run on the same thread
+/// does not accumulate a duplicate system message.
+fn apply_system_prompt(messages: &mut Vec<Message>, prompt: &str) {
+    match messages.first_mut() {
+        Some(first) if first.role == Role::System => {
+            first.content = Content::Text(prompt.to_string())
+        }
+        _ => messages.insert(0, Message::system(prompt)),
     }
 }
 
