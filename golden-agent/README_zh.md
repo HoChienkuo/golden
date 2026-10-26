@@ -57,6 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [x] 会话历史与上下文管理（`Checkpointer`，支持 InMemory / SQLite / MySQL / PostgreSQL）
 - [x] 长期记忆（`Store` 与 `remember` / `recall` 工具，支持 InMemory / SQLite / MySQL / PostgreSQL）
 - [x] 自动工具调用循环（Agent）
+- [x] 中间件钩子（`Retry`、`DynamicPrompt`、`SlidingWindow`）
 - [ ] 历史压缩与摘要（`compact` / `Summarizer`）
 - [ ] 有状态工具
 - [ ] MCP 工具接入

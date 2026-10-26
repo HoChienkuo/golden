@@ -3,9 +3,7 @@
 mod context;
 mod metadata;
 mod middleware;
-mod prompt;
 mod result;
-mod retry;
 mod state;
 mod tools;
 
@@ -24,10 +22,8 @@ use crate::store::{RecallTool, RememberTool};
 
 pub use context::Context;
 pub use metadata::{RunId, ThreadId};
-pub use middleware::{Middleware, ModelHandler, ToolHandler};
-pub use prompt::DynamicPrompt;
+pub use middleware::{DynamicPrompt, Middleware, ModelHandler, Retry, SlidingWindow, ToolHandler};
 pub use result::AgentResult;
-pub use retry::Retry;
 pub use state::AgentState;
 pub use tools::ToolSet;
 

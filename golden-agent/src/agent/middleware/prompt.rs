@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 
+use crate::agent::AgentState;
 use crate::error::Error;
 use crate::llm::chat::{Content, Message, Role};
 
 use super::middleware::Middleware;
-use super::state::AgentState;
 
 /// Rewrites the system prompt before every model call.
 ///

@@ -82,6 +82,9 @@ golden-macros (compile time)  ->  golden-kernel / golden-agent (runtime)  ->  go
 - Preserve the layering: runtime behavior lives in the kernel; `golden-boot` only re-exports.
 - Keep changes minimal and consistent with surrounding code; prefer existing patterns
   (`inventory` registration, `__private` re-export modules) over new dependencies.
+- For `golden-agent` (its `README.md` / `README_zh.md`): when asked to modify or add a feature,
+  implement it directly. Do not add a dedicated README section that introduces the feature and
+  walks through examples unless explicitly requested.
 
 ## Pull Requests
 

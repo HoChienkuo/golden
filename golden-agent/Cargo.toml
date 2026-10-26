@@ -81,3 +81,7 @@ path = "examples/ollama.rs"
 [[example]]
 name = "agent_with_store"
 path = "examples/agent_with_store.rs"
+
+[[example]]
+name = "agent_with_sliding_window"
+path = "examples/agent_with_sliding_window.rs"

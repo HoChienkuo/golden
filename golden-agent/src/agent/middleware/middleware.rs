@@ -6,8 +6,8 @@ use serde_json::Value;
 use crate::error::Error;
 use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ToolCall};
 
-use super::state::AgentState;
-use super::tools::ToolSet;
+use crate::agent::AgentState;
+use crate::agent::tools::ToolSet;
 
 /// The continuation a [`Middleware::wrap_model_call`] implementation invokes to
 /// reach the next layer, ending at the chat model.
@@ -129,7 +129,7 @@ impl ModelHandler for LayeredModel {
 }
 
 /// Builds the model-call chain, with the first middleware outermost.
-pub(crate) fn model_chain(
+pub fn model_chain(
     model: Arc<dyn ChatModel>,
     middlewares: &[Arc<dyn Middleware>],
 ) -> Arc<dyn ModelHandler> {
@@ -191,10 +191,7 @@ impl ToolHandler for LayeredTool {
 }
 
 /// Builds the tool-call chain, with the first middleware outermost.
-pub(crate) fn tool_chain(
-    tools: ToolSet,
-    middlewares: &[Arc<dyn Middleware>],
-) -> Arc<dyn ToolHandler> {
+pub fn tool_chain(tools: ToolSet, middlewares: &[Arc<dyn Middleware>]) -> Arc<dyn ToolHandler> {
     let mut handler: Arc<dyn ToolHandler> = Arc::new(ToolCallTerminal { tools });
     for middleware in middlewares.iter().rev() {
         handler = Arc::new(LayeredTool {

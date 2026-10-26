@@ -60,6 +60,7 @@ streaming — live in
 - [x] Conversation history and context management (`Checkpointer`, InMemory / SQLite / MySQL / PostgreSQL)
 - [x] Long-term memory (`Store` with `remember` / `recall` tools, InMemory / SQLite / MySQL / PostgreSQL)
 - [x] Automatic tool-calling loop (agents)
+- [x] Middleware hooks (`Retry`, `DynamicPrompt`, `SlidingWindow`)
 - [ ] History compaction and summarization (`compact` / `Summarizer`)
 - [ ] Stateful tools
 - [ ] MCP tool sources

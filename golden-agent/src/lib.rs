@@ -14,7 +14,7 @@ pub mod tool;
 
 pub use agent::{
     Agent, AgentBuilder, AgentConfig, AgentEvent, AgentResult, AgentState, AgentStream, Context,
-    DynamicPrompt, Middleware, ModelHandler, Retry, ToolHandler, ToolSet,
+    DynamicPrompt, Middleware, ModelHandler, Retry, SlidingWindow, ToolHandler, ToolSet,
 };
 pub use error::{ApiErrorBody, ApiErrorDetail, Error};
 pub use llm::chat::{
