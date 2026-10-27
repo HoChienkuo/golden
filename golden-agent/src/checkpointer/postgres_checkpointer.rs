@@ -1,11 +1,11 @@
 use async_trait::async_trait;
-use sqlx::Postgres;
 use sqlx::QueryBuilder;
 use sqlx::postgres::PgPool;
 
 use crate::Error;
 use crate::checkpointer::sql_common::{
-    MessageRow, content_json, flag, persistence, role_str, row_to_message, tool_calls_json,
+    DatabasePool, DatabaseTransaction, MessageRow, flag, insert_message, migrate, next_seq,
+    persistence, row_to_message,
 };
 use crate::checkpointer::{CheckpointMessage, Checkpointer};
 
@@ -34,58 +34,8 @@ impl PostgresCheckpointer {
 
     /// Creates the `messages` table and index if they do not exist.
     pub async fn migrate(&self) -> Result<(), Error> {
-        for stmt in DDL.split(';') {
-            let stmt = stmt.trim();
-            if stmt.is_empty() {
-                continue;
-            }
-            sqlx::query(stmt)
-                .execute(&self.pool)
-                .await
-                .map_err(persistence)?;
-        }
-        Ok(())
+        migrate(DatabasePool::Postgres(&self.pool), DDL).await
     }
-}
-
-async fn next_seq(tx: &mut sqlx::Transaction<'_, Postgres>, thread_id: &str) -> Result<u64, Error> {
-    let max_seq: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(seq) FROM messages WHERE thread_id = $1")
-            .bind(thread_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(persistence)?
-            .flatten();
-    Ok(max_seq.map_or(0, |m| (m + 1) as u64))
-}
-
-async fn insert_message(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    message: &CheckpointMessage,
-) -> Result<(), Error> {
-    sqlx::query(
-        r#"
-        INSERT INTO messages
-            (id, thread_id, run_id, seq, role, content,
-             tool_calls, tool_call_id, created_at,
-             is_context)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        "#,
-    )
-    .bind(&message.id)
-    .bind(&message.thread_id)
-    .bind(&message.run_id)
-    .bind(message.seq as i64)
-    .bind(role_str(message.role))
-    .bind(content_json(message)?)
-    .bind(tool_calls_json(message)?)
-    .bind(&message.tool_call_id)
-    .bind(message.created_at)
-    .bind(flag(message.is_context))
-    .execute(&mut **tx)
-    .await
-    .map_err(persistence)?;
-    Ok(())
 }
 
 #[async_trait]
@@ -117,13 +67,13 @@ impl Checkpointer for PostgresCheckpointer {
         }
 
         let mut tx = self.pool.begin().await.map_err(persistence)?;
-        let mut next = next_seq(&mut tx, thread_id).await?;
+        let mut next = next_seq(DatabaseTransaction::Postgres(&mut tx), thread_id).await?;
 
         for mut message in messages {
             message.thread_id = thread_id.to_string();
             message.seq = next;
             next += 1;
-            insert_message(&mut tx, &message).await?;
+            insert_message(DatabaseTransaction::Postgres(&mut tx), &message).await?;
         }
 
         tx.commit().await.map_err(persistence)?;
