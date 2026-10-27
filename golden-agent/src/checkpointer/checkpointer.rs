@@ -15,26 +15,8 @@ pub trait Checkpointer: Send + Sync {
     ///
     /// Implementations assign the real `seq` values (strictly increasing per
     /// thread) and ignore the `seq` field of each input row. The `id` field
-    /// must be preserved: it is referenced by [`Self::compact`] and by
-    /// [`CheckpointMessage::summary_of`].
+    /// must be preserved: it identifies each row.
     ///
     /// Appending must be atomic: either every row is written, or none.
     async fn append(&self, thread_id: &str, messages: Vec<CheckpointMessage>) -> Result<(), Error>;
-
-    /// Hides a range of messages and inserts a summary covering them.
-    ///
-    /// Sets `is_context = false` on the rows whose `id` is in `ids`, and
-    /// inserts `summary` (which must have `is_summary = true`,
-    /// `is_context = true`, and `summary_of = Some(ids)`). The summary's
-    /// `created_at` should equal the last covered row's `created_at` so it
-    /// sorts right before the messages that follow the range.
-    ///
-    /// The operation is atomic. Callers must ensure the covered range does
-    /// not split a tool-call pair (invariant 3).
-    async fn compact(
-        &self,
-        thread_id: &str,
-        ids: &[String],
-        summary: CheckpointMessage,
-    ) -> Result<(), Error>;
 }

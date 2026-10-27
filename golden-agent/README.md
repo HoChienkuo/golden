@@ -61,7 +61,7 @@ streaming — live in
 - [x] Long-term memory (`Store` with `remember` / `recall` tools, InMemory / SQLite / MySQL / PostgreSQL)
 - [x] Automatic tool-calling loop (agents)
 - [x] Middleware hooks (`Retry`, `DynamicPrompt`, `SlidingWindow`)
-- [ ] History compaction and summarization (`compact` / `Summarizer`)
+- [ ] History compaction and summarization (`Summarizer` / compaction middleware)
 - [ ] Stateful tools
 - [ ] MCP tool sources
 - [ ] Web endpoints (HTTP / SSE)

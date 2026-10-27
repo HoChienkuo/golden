@@ -9,8 +9,6 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_call_id TEXT,
     created_at   BIGINT      NOT NULL,
     is_context   BOOLEAN     NOT NULL DEFAULT TRUE,
-    is_summary   BOOLEAN     NOT NULL DEFAULT FALSE,
-    summary_of   JSONB,
     UNIQUE (thread_id, seq)
 );
 

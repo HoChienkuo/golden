@@ -71,13 +71,6 @@ pub enum Error {
         raw: String,
     },
 
-    /// The operation is not supported by this implementation.
-    #[error("{operation} is not supported")]
-    Unsupported {
-        /// The unsupported operation name.
-        operation: &'static str,
-    },
-
     /// A persistence backend failed (SQL, serialization, or schema violation).
     #[error("persistence error: {message}")]
     Persistence {

@@ -1,11 +1,9 @@
 use async_trait::async_trait;
-use sqlx::QueryBuilder;
 use sqlx::sqlite::SqlitePool;
 
 use crate::Error;
 use crate::checkpointer::sql_common::{
-    MessageRow, content_json, flag, persistence, role_str, row_to_message, summary_of_json,
-    tool_calls_json, validate_compact,
+    MessageRow, content_json, flag, persistence, role_str, row_to_message, tool_calls_json,
 };
 use crate::checkpointer::{CheckpointMessage, Checkpointer};
 
@@ -70,8 +68,8 @@ async fn insert_message(
         INSERT INTO messages
             (id, thread_id, run_id, seq, role, content,
              tool_calls, tool_call_id, created_at,
-             is_context, is_summary, summary_of)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             is_context)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&message.id)
@@ -84,8 +82,6 @@ async fn insert_message(
     .bind(&message.tool_call_id)
     .bind(message.created_at)
     .bind(flag(message.is_context))
-    .bind(flag(message.is_summary))
-    .bind(summary_of_json(message)?)
     .execute(&mut **tx)
     .await
     .map_err(persistence)?;
@@ -99,7 +95,7 @@ impl Checkpointer for SqliteCheckpointer {
             r#"
             SELECT id, thread_id, run_id, seq, role, content,
                    tool_calls, tool_call_id, created_at,
-                   is_context, is_summary, summary_of
+                   is_context
             FROM messages
             WHERE thread_id = ? AND is_context = 1
             ORDER BY created_at ASC, seq ASC
@@ -129,52 +125,6 @@ impl Checkpointer for SqliteCheckpointer {
             next += 1;
             insert_message(&mut tx, &message).await?;
         }
-
-        tx.commit().await.map_err(persistence)?;
-        Ok(())
-    }
-
-    async fn compact(
-        &self,
-        thread_id: &str,
-        ids: &[String],
-        summary: CheckpointMessage,
-    ) -> Result<(), Error> {
-        validate_compact(ids, &summary)?;
-
-        let mut tx = self.pool.begin().await.map_err(persistence)?;
-
-        // Hide the covered messages. The `IN` list is built from binds, so no
-        // id can alter the statement.
-        let mut qb = QueryBuilder::new("UPDATE messages SET is_context = 0 WHERE thread_id = ");
-        qb.push_bind(thread_id);
-        qb.push(" AND id IN (");
-        for (i, id) in ids.iter().enumerate() {
-            if i > 0 {
-                qb.push(", ");
-            }
-            qb.push_bind(id);
-        }
-        qb.push(")");
-        let result = qb.build().execute(&mut *tx).await.map_err(persistence)?;
-
-        // Every id must have matched; otherwise a typo would silently drop
-        // messages from the covered range.
-        if result.rows_affected() != ids.len() as u64 {
-            return Err(persistence(format!(
-                "compact: expected to hide {} rows, hid {}",
-                ids.len(),
-                result.rows_affected()
-            )));
-        }
-
-        // The summary covers exactly `ids` and takes the next sequence slot.
-        let mut summary = summary;
-        summary.thread_id = thread_id.to_string();
-        summary.summary_of = Some(ids.to_vec());
-        summary.seq = next_seq(&mut tx, thread_id).await?;
-
-        insert_message(&mut tx, &summary).await?;
 
         tx.commit().await.map_err(persistence)?;
         Ok(())

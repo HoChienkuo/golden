@@ -4,17 +4,11 @@ use sqlx::postgres::PgPool;
 
 use crate::Error;
 use crate::checkpointer::sql_common::{
-    MessageRow, content_json, flag, persistence, role_str, row_to_message, summary_of_json,
-    tool_calls_json, validate_compact,
+    MessageRow, content_json, flag, persistence, role_str, row_to_message, tool_calls_json,
 };
 use crate::checkpointer::{CheckpointMessage, Checkpointer};
 
 const DDL: &str = include_str!("postgres_messages.sql");
-
-/// The batch size of the `= ANY($1)` id list in [`PostgresCheckpointer::compact`].
-///
-/// Stays far below PostgreSQL's 65535 bind-parameter limit.
-const ID_BATCH: usize = 512;
 
 /// A PostgreSQL-backed [`Checkpointer`], gated on the `persistence-postgres` feature.
 pub struct PostgresCheckpointer {
@@ -73,8 +67,8 @@ async fn insert_message(
         INSERT INTO messages
             (id, thread_id, run_id, seq, role, content,
              tool_calls, tool_call_id, created_at,
-             is_context, is_summary, summary_of)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             is_context)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         "#,
     )
     .bind(&message.id)
@@ -87,8 +81,6 @@ async fn insert_message(
     .bind(&message.tool_call_id)
     .bind(message.created_at)
     .bind(flag(message.is_context))
-    .bind(flag(message.is_summary))
-    .bind(summary_of_json(message)?)
     .execute(&mut **tx)
     .await
     .map_err(persistence)?;
@@ -102,7 +94,7 @@ impl Checkpointer for PostgresCheckpointer {
             r#"
             SELECT id, thread_id, run_id, seq, role, content,
                    tool_calls, tool_call_id, created_at,
-                   is_context, is_summary, summary_of
+                   is_context
             FROM messages
             WHERE thread_id = $1 AND is_context = TRUE
             ORDER BY created_at ASC, seq ASC
@@ -132,55 +124,6 @@ impl Checkpointer for PostgresCheckpointer {
             next += 1;
             insert_message(&mut tx, &message).await?;
         }
-
-        tx.commit().await.map_err(persistence)?;
-        Ok(())
-    }
-
-    async fn compact(
-        &self,
-        thread_id: &str,
-        ids: &[String],
-        summary: CheckpointMessage,
-    ) -> Result<(), Error> {
-        validate_compact(ids, &summary)?;
-
-        let mut tx = self.pool.begin().await.map_err(persistence)?;
-
-        // Hide the covered messages. Batched `= ANY($1)` keeps the bind count
-        // constant no matter how long the range is.
-        let mut hidden = 0u64;
-        for chunk in ids.chunks(ID_BATCH) {
-            let chunk: Vec<&str> = chunk.iter().map(String::as_str).collect();
-            let result = sqlx::query(
-                "UPDATE messages SET is_context = FALSE \
-                 WHERE thread_id = $1 AND id = ANY($2)",
-            )
-            .bind(thread_id)
-            .bind(&chunk)
-            .execute(&mut *tx)
-            .await
-            .map_err(persistence)?;
-            hidden += result.rows_affected();
-        }
-
-        // Every id must have matched; otherwise a typo would silently drop
-        // messages from the covered range.
-        if hidden != ids.len() as u64 {
-            return Err(persistence(format!(
-                "compact: expected to hide {} rows, hid {}",
-                ids.len(),
-                hidden
-            )));
-        }
-
-        // The summary covers exactly `ids` and takes the next sequence slot.
-        let mut summary = summary;
-        summary.thread_id = thread_id.to_string();
-        summary.summary_of = Some(ids.to_vec());
-        summary.seq = next_seq(&mut tx, thread_id).await?;
-
-        insert_message(&mut tx, &summary).await?;
 
         tx.commit().await.map_err(persistence)?;
         Ok(())

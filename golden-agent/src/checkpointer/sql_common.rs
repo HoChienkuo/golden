@@ -12,7 +12,7 @@ pub(crate) fn persistence(err: impl std::fmt::Display) -> Error {
 /// A message row as stored in the `messages` table.
 ///
 /// Field order matches every backend's `SELECT` list, so `FromRow` derives and
-/// `try_get` by index both line up with the schema. `is_context` / `is_summary`
+/// `try_get` by index both line up with the schema. `is_context`
 /// are integers because SQLite has no boolean type; the other backends read
 /// their `BOOLEAN` columns into the same fields.
 #[derive(sqlx::FromRow)]
@@ -27,8 +27,6 @@ pub(crate) struct MessageRow {
     pub tool_call_id: Option<String>,
     pub created_at: i64,
     pub is_context: i64,
-    pub is_summary: i64,
-    pub summary_of: Option<String>,
 }
 
 /// Reconstructs a [`CheckpointMessage`] from its stored row.
@@ -44,8 +42,6 @@ pub(crate) fn row_to_message(row: MessageRow) -> Result<CheckpointMessage, Error
         tool_call_id,
         created_at,
         is_context,
-        is_summary,
-        summary_of,
     } = row;
     Ok(CheckpointMessage {
         id,
@@ -61,11 +57,6 @@ pub(crate) fn row_to_message(row: MessageRow) -> Result<CheckpointMessage, Error
         tool_call_id,
         created_at,
         is_context: is_context != 0,
-        is_summary: is_summary != 0,
-        summary_of: match summary_of {
-            Some(json) => Some(serde_json::from_str(&json).map_err(persistence)?),
-            None => None,
-        },
     })
 }
 
@@ -98,32 +89,6 @@ pub(crate) fn content_json(message: &CheckpointMessage) -> Result<String, Error>
 /// The `tool_calls` column value of a message.
 pub(crate) fn tool_calls_json(message: &CheckpointMessage) -> Result<String, Error> {
     serde_json::to_string(&message.tool_calls).map_err(persistence)
-}
-
-/// The `summary_of` column value of a message, or `NULL` for normal messages.
-pub(crate) fn summary_of_json(message: &CheckpointMessage) -> Result<Option<String>, Error> {
-    message
-        .summary_of
-        .as_ref()
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(persistence)
-}
-
-/// Validates the invariants of [`Checkpointer::compact`](crate::Checkpointer::compact)
-/// before any row is touched.
-pub(crate) fn validate_compact(ids: &[String], summary: &CheckpointMessage) -> Result<(), Error> {
-    if ids.is_empty() {
-        return Err(persistence("compact: ids must not be empty"));
-    }
-
-    // The summary must be visible context and flagged as a summary.
-    if !summary.is_summary || !summary.is_context {
-        return Err(persistence(
-            "compact: summary must have is_summary = true and is_context = true",
-        ));
-    }
-    Ok(())
 }
 
 /// The wire type of the two boolean-ish columns.

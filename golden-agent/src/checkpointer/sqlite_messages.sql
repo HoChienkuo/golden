@@ -9,8 +9,6 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_call_id TEXT,
     created_at   INTEGER NOT NULL,
     is_context   INTEGER NOT NULL DEFAULT 1,
-    is_summary   INTEGER NOT NULL DEFAULT 0,
-    summary_of   TEXT,
     UNIQUE (thread_id, seq)
 );
 

@@ -41,10 +41,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let role: String = row.try_get("role")?;
         let content: String = row.try_get("content")?;
         let is_context: i64 = row.try_get("is_context")?;
-        let is_summary: i64 = row.try_get("is_summary")?;
 
         println!(
-            "[{thread_id} #{seq}] {role} (run={run_id}, ctx={is_context}, sum={is_summary})\n  id={id}\n  content={content}"
+            "[{thread_id} #{seq}] {role} (run={run_id}, ctx={is_context})\n  id={id}\n  content={content}"
         );
     }
 

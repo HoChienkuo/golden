@@ -51,15 +51,4 @@ impl Checkpointer for InMemoryCheckpointer {
         }
         Ok(())
     }
-
-    async fn compact(
-        &self,
-        _thread_id: &str,
-        _ids: &[String],
-        _summary: CheckpointMessage,
-    ) -> Result<(), Error> {
-        Err(Error::Unsupported {
-            operation: "compact",
-        })
-    }
 }
