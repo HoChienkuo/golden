@@ -154,6 +154,10 @@ fn from_wire_message(message: WireResponseMessage) -> Message {
             .map(from_wire_tool_call)
             .collect(),
         tool_call_id: None,
+        id: None,
+        run_id: None,
+        is_context: true,
+        created_at: None,
     }
 }
 

@@ -51,4 +51,25 @@ impl Checkpointer for InMemoryCheckpointer {
         }
         Ok(())
     }
+
+    async fn set_context(
+        &self,
+        thread_id: &str,
+        ids: &[String],
+        is_context: bool,
+    ) -> Result<(), Error> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let mut threads = self.threads.lock().expect("mutex poisoned");
+        let Some(state) = threads.get_mut(thread_id) else {
+            return Ok(());
+        };
+        for message in &mut state.messages {
+            if ids.contains(&message.id) {
+                message.is_context = is_context;
+            }
+        }
+        Ok(())
+    }
 }

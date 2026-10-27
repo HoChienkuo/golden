@@ -77,19 +77,24 @@ impl CheckpointMessage {
     /// [`Checkpointer::append`](crate::Checkpointer::append).
     pub fn from_message(msg: &Message, thread_id: &str, run_id: &str) -> Self {
         Self {
-            id: uuid::Uuid::now_v7().to_string(),
+            id: msg
+                .id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
             thread_id: thread_id.to_string(),
-            run_id: run_id.to_string(),
+            run_id: msg.run_id.clone().unwrap_or_else(|| run_id.to_string()),
             seq: 0,
             role: msg.role,
             content: msg.content.clone(),
             tool_calls: msg.tool_calls.clone(),
             tool_call_id: msg.tool_call_id.clone(),
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0),
-            is_context: true,
+            created_at: msg.created_at.unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0)
+            }),
+            is_context: msg.is_context,
         }
     }
 }
@@ -106,6 +111,10 @@ impl From<CheckpointMessage> for Message {
             name: None,
             tool_calls: stored.tool_calls,
             tool_call_id: stored.tool_call_id,
+            id: Some(stored.id),
+            run_id: Some(stored.run_id),
+            is_context: stored.is_context,
+            created_at: Some(stored.created_at),
         }
     }
 }

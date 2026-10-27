@@ -158,6 +158,28 @@ pub struct Message {
     pub tool_calls: Vec<ToolCall>,
     /// The id of the tool call this message responds to (tool messages).
     pub tool_call_id: Option<String>,
+
+    /// The persistence id of this message, once it has been stored.
+    ///
+    /// `None` for messages that have not been persisted yet. Set by
+    /// `from_message` and used to target `set_context` / compaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The run that produced this message (`RunId`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+
+    /// Whether this message is fed to the model as context.
+    ///
+    /// `true` (the default). Compaction sets it to `false` for messages
+    /// replaced by a summary.
+    #[serde(default = "default_true")]
+    pub is_context: bool,
+
+    /// The creation timestamp (unix seconds), assigned when persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
 }
 
 impl Message {
@@ -169,6 +191,10 @@ impl Message {
             name: None,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            id: None,
+            run_id: None,
+            is_context: true,
+            created_at: None,
         }
     }
 
@@ -209,6 +235,18 @@ impl Message {
     /// Sets the id of the tool call this message responds to.
     pub fn tool_call_id(mut self, tool_call_id: impl Into<String>) -> Self {
         self.tool_call_id = Some(tool_call_id.into());
+        self
+    }
+
+    /// Sets the persistence id (used when re-hydrating from storage).
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    /// Sets the run id (used when attributing messages to a run).
+    pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
         self
     }
 
@@ -438,4 +476,8 @@ pub struct Usage {
     pub completion_tokens: u32,
     /// The total number of tokens used.
     pub total_tokens: u32,
+}
+
+fn default_true() -> bool {
+    true
 }

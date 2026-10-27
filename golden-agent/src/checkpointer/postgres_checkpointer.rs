@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use sqlx::Postgres;
+use sqlx::QueryBuilder;
 use sqlx::postgres::PgPool;
 
 use crate::Error;
@@ -126,6 +127,31 @@ impl Checkpointer for PostgresCheckpointer {
         }
 
         tx.commit().await.map_err(persistence)?;
+        Ok(())
+    }
+
+    async fn set_context(
+        &self,
+        thread_id: &str,
+        ids: &[String],
+        is_context: bool,
+    ) -> Result<(), Error> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let mut qb = QueryBuilder::new("UPDATE messages SET is_context = ");
+        qb.push_bind(flag(is_context));
+        qb.push(" WHERE thread_id = ");
+        qb.push_bind(thread_id);
+        qb.push(" AND id IN (");
+        for (i, id) in ids.iter().enumerate() {
+            if i > 0 {
+                qb.push(", ");
+            }
+            qb.push_bind(id);
+        }
+        qb.push(")");
+        qb.build().execute(&self.pool).await.map_err(persistence)?;
         Ok(())
     }
 }

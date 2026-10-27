@@ -19,4 +19,16 @@ pub trait Checkpointer: Send + Sync {
     ///
     /// Appending must be atomic: either every row is written, or none.
     async fn append(&self, thread_id: &str, messages: Vec<CheckpointMessage>) -> Result<(), Error>;
+
+    /// Marks the rows with the given ids as visible or hidden context.
+    ///
+    /// `is_context = true` rows are returned by [`Self::load`]; `false` rows
+    /// are hidden from the model but retained for audit / restoration.
+    /// Ids that do not exist are ignored.
+    async fn set_context(
+        &self,
+        thread_id: &str,
+        ids: &[String],
+        is_context: bool,
+    ) -> Result<(), Error>;
 }

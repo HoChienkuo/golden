@@ -66,6 +66,10 @@ pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
             name: None,
             tool_calls,
             tool_call_id: None,
+            id: None,
+            run_id: None,
+            is_context: true,
+            created_at: None,
         },
         finish_reason: response.stop_reason.as_deref().map(parse_finish_reason),
         usage: Some(Usage {
