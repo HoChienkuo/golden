@@ -28,6 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .tools(ToolSet::registered()?)
         .system_prompt("You answer concisely and call tools when needed.")
         .middleware(Retry::new())
+        .max_concurrent_tool_calls(3)
         .max_steps(8)
         .build()?;
 

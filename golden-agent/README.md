@@ -65,7 +65,7 @@ streaming — live in
 - [ ] Stateful tools
 - [ ] MCP tool sources
 - [ ] Web endpoints (HTTP / SSE)
-- [ ] Parallel tool execution
+- [x] Parallel tool execution
 - [ ] Human-in-the-loop (pause a run for confirmation or approval)
 - [ ] RAG / retrieval
 - [ ] Embeddings

@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use futures_core::Stream;
 use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 
 use crate::checkpointer::CheckpointMessage;
 use crate::checkpointer::Checkpointer;
@@ -37,6 +38,12 @@ pub struct AgentConfig {
     /// When `false` (the default), a tool error becomes a tool message so the
     /// model can react to it.
     pub abort_on_tool_error: bool,
+    /// How many tool calls from one model response may run at the same time.
+    ///
+    /// `1` (the default) runs them sequentially; higher values execute
+    /// independent calls concurrently while results still feed back to the
+    /// model in the order the model requested them.
+    pub max_concurrent_tool_calls: usize,
 }
 
 impl Default for AgentConfig {
@@ -44,6 +51,7 @@ impl Default for AgentConfig {
         Self {
             max_steps: 10,
             abort_on_tool_error: false,
+            max_concurrent_tool_calls: 1,
         }
     }
 }
@@ -289,29 +297,44 @@ impl Agent {
                     return;
                 }
 
-                let mut direct: Option<String> = None;
-                for call in tool_calls {
+                // Announce every call the model requested before running any.
+                for call in &tool_calls {
                     yield Ok(AgentEvent::ToolCall(call.clone()));
+                }
 
-                    let content = match tool.handle(call.clone()).await {
-                        Ok(content) => {
-                            if direct.is_none() && returns_direct(&tools, &call.name) {
-                                direct = Some(content.clone());
-                            }
-                            content
-                        }
+                // Run the batch concurrently, yielding each result live in
+                // completion order. `results` is indexed by call position.
+                let mut results: Vec<Option<(ToolCall, String, bool)>> =
+                    (0..tool_calls.len()).map(|_| None).collect();
+                let mut batch = Box::pin(execute_tool_batch(
+                    Arc::clone(&tool),
+                    tool_calls,
+                    config.max_concurrent_tool_calls,
+                ));
+
+                while let Some(outcome) = batch.next().await {
+                    let ToolOutcome { index, call, result } = outcome;
+                    let (content, ok) = match result {
+                        Ok(content) => (content, true),
                         Err(error) if config.abort_on_tool_error => {
                             yield Err(error);
                             return;
                         }
-                        Err(error) => format!("Error: {error}"),
+                        Err(error) => (format!("Error: {error}"), false),
                     };
+                    results[index] = Some((call.clone(), content.clone(), ok));
+                    yield Ok(AgentEvent::ToolResult { call, content });
+                }
 
-                    state.messages.push(Message::tool(call.id.clone(), content.clone()));
-                    yield Ok(AgentEvent::ToolResult {
-                        call,
-                        content,
-                    });
+
+                // Feed results back in the model's call order, whatever order
+                // the calls finished in. (flatten() preserves index order.)
+                let mut direct: Option<String> = None;
+                for (call, content, ok) in results.into_iter().flatten() {
+                    if ok && direct.is_none() && returns_direct(&tools, &call.name) {
+                        direct = Some(content.clone());
+                    }
+                    state.messages.push(Message::tool(call.id.clone(), content));
                 }
 
                 if let Err(error) = persist_step_stream(
@@ -388,9 +411,19 @@ impl Agent {
                 break;
             }
 
+            let calls = response.message.tool_calls.clone();
+            let mut outcomes: Vec<ToolOutcome> = execute_tool_batch(
+                Arc::clone(&tool),
+                calls.clone(),
+                self.config.max_concurrent_tool_calls,
+            )
+            .collect()
+            .await;
+            outcomes.sort_by_key(|outcome| outcome.index);
+
             let mut direct: Option<String> = None;
-            for call in &response.message.tool_calls {
-                match tool.handle(call.clone()).await {
+            for (call, outcome) in calls.iter().zip(outcomes) {
+                match outcome.result {
                     Ok(content) => {
                         if direct.is_none() && returns_direct(&self.tools, &call.name) {
                             direct = Some(content.clone());
@@ -478,6 +511,54 @@ fn direct_answer(content: &str) -> String {
     serde_json::from_str::<String>(content).unwrap_or_else(|_| content.to_string())
 }
 
+/// One tool call's outcome, tagged with its position in the model's batch.
+struct ToolOutcome {
+    /// Position of the call within the assistant message's `tool_calls`.
+    index: usize,
+    /// The call that produced this outcome.
+    call: ToolCall,
+    /// The tool's result, or the error it failed with.
+    result: Result<String, Error>,
+}
+
+/// Runs a batch of tool calls concurrently — up to `concurrency` in flight —
+/// yielding each outcome as soon as its call finishes.
+///
+/// Outcomes arrive in completion order; [`ToolOutcome::index`] lets callers
+/// restore the model's request order afterwards.
+fn execute_tool_batch(
+    tool: Arc<dyn ToolHandler>,
+    calls: Vec<ToolCall>,
+    concurrency: usize,
+) -> impl Stream<Item = ToolOutcome> {
+    async_stream::stream! {
+        let mut queue = calls.into_iter().enumerate();
+        let mut pending = FuturesUnordered::new();
+
+        for(index, call) in queue.by_ref().take(concurrency.max(1)) {
+            pending.push(run_tool_call(Arc::clone(&tool), index, call));
+        }
+
+        // Each time a call finishes, start the next one and yield the outcome.
+        while let Some(outcome) = pending.next().await {
+            yield outcome;
+            if let Some((index, call)) = queue.next() {
+                pending.push(run_tool_call(Arc::clone(&tool), index, call));
+            }
+        }
+    }
+}
+
+/// Runs one tool call, pairing its outcome with its batch position.
+async fn run_tool_call(tool: Arc<dyn ToolHandler>, index: usize, call: ToolCall) -> ToolOutcome {
+    let result = tool.handle(call.clone()).await;
+    ToolOutcome {
+        index,
+        call,
+        result,
+    }
+}
+
 /// Builds an [`Agent`].
 #[derive(Default)]
 pub struct AgentBuilder {
@@ -540,6 +621,14 @@ impl AgentBuilder {
     /// Sets the maximum number of model/tool cycles.
     pub fn max_steps(mut self, max_steps: usize) -> Self {
         self.config.max_steps = max_steps;
+        self
+    }
+
+    /// Sets how many tool calls from one model response may run concurrently.
+    ///
+    /// `1` runs them sequentially; values above one enable parallel execution.
+    pub fn max_concurrent_tool_calls(mut self, limit: usize) -> Self {
+        self.config.max_concurrent_tool_calls = limit;
         self
     }
 
