@@ -62,6 +62,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [ ] 有状态工具
 - [ ] MCP 工具接入
 - [ ] Web 端点（HTTP / SSE）
+- [ ] 并行工具调用
+- [ ] 人工介入（暂停运行等待确认或审批）
+- [ ] RAG / 检索
+- [ ] Embedding
+- [ ] 文本切分（text splitters）
+- [ ] 多 Agent 编排
+- [ ] 模型 fallback
 
 ## 许可证
 
