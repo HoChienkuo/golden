@@ -229,7 +229,8 @@ where
                     }
                 }
 
-                let line = String::from_utf8_lossy(line_bytes);
+                let line_bytes: Vec<u8> = this.buffer.drain(..=position).collect();
+                let line = String::from_utf8_lossy(&line_bytes);
                 let line = line.trim();
 
                 if line == "data: [DONE]" {
@@ -351,5 +352,20 @@ mod tests {
 
         assert_eq!(text, "你好");
         assert!(!text.contains('\u{FFFD}'));
+    }
+
+    #[tokio::test]
+    async fn complete_events_are_consumed_and_the_stream_terminates() {
+        // Two complete events in a single chunk: the first must be parsed and
+        // removed from the buffer, the second must terminate the stream rather
+        // than being re-read forever.
+        let text = collect_text(vec![
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n\
+              data: [DONE]\n\n"
+                .as_slice(),
+        ])
+        .await;
+
+        assert_eq!(text, "hi");
     }
 }
