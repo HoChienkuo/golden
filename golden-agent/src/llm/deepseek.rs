@@ -15,6 +15,14 @@ pub enum DeepSeekModel {
 }
 
 impl DeepSeekModel {
+    /// All non-deprecated built-in models, excluding custom model ids.
+    pub const BUILT_IN: &'static [Self] = &[Self::Flash, Self::V4Pro];
+
+    /// Iterates over all non-deprecated built-in models.
+    pub fn built_in() -> impl ExactSizeIterator<Item = &'static Self> {
+        Self::BUILT_IN.iter()
+    }
+
     pub fn as_str(&self) -> &str {
         match self {
             DeepSeekModel::Flash => "deepseek-flash",

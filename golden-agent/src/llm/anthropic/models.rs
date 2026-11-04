@@ -57,6 +57,31 @@ pub enum AnthropicModel {
 }
 
 impl AnthropicModel {
+    /// All non-deprecated built-in models, excluding custom model ids.
+    pub const BUILT_IN: &'static [Self] = &[
+        Self::ClaudeFable51,
+        Self::ClaudeFable5,
+        Self::ClaudeMythos51,
+        Self::ClaudeMythos5,
+        Self::ClaudeMythosPreview,
+        Self::ClaudeOpus55,
+        Self::ClaudeOpus5,
+        Self::ClaudeSonnet55,
+        Self::ClaudeSonnet5,
+        Self::ClaudeOpus48,
+        Self::ClaudeOpus47,
+        Self::ClaudeOpus46,
+        Self::ClaudeOpus45,
+        Self::ClaudeSonnet46,
+        Self::ClaudeSonnet45,
+        Self::ClaudeHaiku45,
+    ];
+
+    /// Iterates over all non-deprecated built-in models.
+    pub fn built_in() -> impl ExactSizeIterator<Item = &'static Self> {
+        Self::BUILT_IN.iter()
+    }
+
     /// Returns the model id sent in the request.
     #[allow(deprecated)]
     pub fn as_str(&self) -> &str {

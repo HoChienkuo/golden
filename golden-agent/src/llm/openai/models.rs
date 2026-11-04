@@ -67,6 +67,43 @@ pub enum OpenAiModel {
 }
 
 impl OpenAiModel {
+    /// All non-deprecated built-in models, excluding custom model ids.
+    pub const BUILT_IN: &'static [Self] = &[
+        Self::Gpt5,
+        Self::Gpt5Mini,
+        Self::Gpt5Nano,
+        Self::Gpt5Pro,
+        Self::Gpt51,
+        Self::Gpt52,
+        Self::Gpt52Pro,
+        Self::Gpt54,
+        Self::Gpt54Mini,
+        Self::Gpt54Nano,
+        Self::Gpt54Pro,
+        Self::Gpt55,
+        Self::Gpt55Pro,
+        Self::Gpt56,
+        Self::Gpt56Luna,
+        Self::Gpt56Sol,
+        Self::Gpt56Terra,
+        Self::Gpt6Astra,
+        Self::Gpt6Luna,
+        Self::Gpt6Sol,
+        Self::O3,
+        Self::O3Pro,
+        Self::Gpt41,
+        Self::Gpt41Mini,
+        Self::Gpt4o,
+        Self::Gpt4oMini,
+        Self::GptAudio,
+        Self::GptAudioMini,
+    ];
+
+    /// Iterates over all non-deprecated built-in models.
+    pub fn built_in() -> impl ExactSizeIterator<Item = &'static Self> {
+        Self::BUILT_IN.iter()
+    }
+
     #[allow(deprecated)]
     pub fn as_str(&self) -> &str {
         match self {
