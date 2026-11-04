@@ -115,7 +115,7 @@ impl ChatModel for OpenAiLlm {
             let inner = response.bytes_stream();
             let mut line_stream = SseLineStream {
                 inner,
-                buffer: String::new(),
+                buffer: Vec::new(),
                 done: false,
                 pending: VecDeque::new(),
                 tool_calls: BTreeMap::new(),
@@ -134,7 +134,7 @@ impl ChatModel for OpenAiLlm {
 /// as complete [`ChatEvent::ToolCall`]s when the stream ends.
 struct SseLineStream<S> {
     inner: S,
-    buffer: String,
+    buffer: Vec<u8>,
     done: bool,
     pending: VecDeque<ChatEvent>,
     tool_calls: BTreeMap<usize, PartialToolCall>,
@@ -204,8 +204,32 @@ where
                 return Poll::Ready(None);
             }
 
-            if let Some(position) = this.buffer.find('\n') {
-                let line: String = this.buffer.drain(..=position).collect();
+            if let Some(position) = this.buffer.iter().position(|&byte| byte == b'\n') {
+                let line_bytes = &this.buffer[..position];
+                // A trailing multi-byte character split across chunks leaves an
+                // incomplete sequence at the end of the line; keep the line in the
+                // buffer until the next chunk completes it.
+                if let Err(error) = std::str::from_utf8(line_bytes)
+                    && error.error_len().is_none()
+                {
+                    match futures_util::ready!(this.inner.poll_next_unpin(cx)) {
+                        Some(Ok(bytes)) => {
+                            this.buffer.extend_from_slice(&bytes);
+                            continue;
+                        }
+                        Some(Err(error)) => {
+                            this.done = true;
+                            return Poll::Ready(Some(Err(Error::Request(error))));
+                        }
+                        None => {
+                            this.done = true;
+                            this.flush_tool_calls();
+                            continue;
+                        }
+                    }
+                }
+
+                let line = String::from_utf8_lossy(line_bytes);
                 let line = line.trim();
 
                 if line == "data: [DONE]" {
@@ -231,7 +255,7 @@ where
             }
 
             match futures_util::ready!(this.inner.poll_next_unpin(cx)) {
-                Some(Ok(bytes)) => this.buffer.push_str(&String::from_utf8_lossy(&bytes)),
+                Some(Ok(bytes)) => this.buffer.extend_from_slice(&bytes),
                 Some(Err(error)) => {
                     this.done = true;
                     return Poll::Ready(Some(Err(Error::Request(error))));
@@ -286,4 +310,46 @@ struct StreamFunction {
     name: Option<String>,
     #[serde(default)]
     arguments: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Feeds `chunks` through [`SseLineStream`] and joins the emitted text.
+    async fn collect_text(chunks: Vec<&'static [u8]>) -> String {
+        let stream = futures_util::stream::iter(
+            chunks
+                .into_iter()
+                .map(|chunk| Ok::<_, reqwest::Error>(Bytes::from_static(chunk))),
+        );
+        let mut lines = SseLineStream {
+            inner: stream,
+            buffer: Vec::new(),
+            done: false,
+            pending: VecDeque::new(),
+            tool_calls: BTreeMap::new(),
+        };
+
+        let mut text = String::new();
+        while let Some(item) = lines.next().await {
+            if let ChatEvent::Text(delta) = item.unwrap() {
+                text.push_str(&delta);
+            }
+        }
+        text
+    }
+
+    #[tokio::test]
+    async fn multibyte_character_split_across_chunks_is_not_mangled() {
+        // "你好" split mid-character: [0xE4, 0xBD] | [0xA0, 0xE5, 0xA5, 0xBD].
+        let text = collect_text(vec![
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"\xe4\xbd".as_slice(),
+            b"\xa0\xe5\xa5\xbd\"}}]}\n\n",
+        ])
+        .await;
+
+        assert_eq!(text, "你好");
+        assert!(!text.contains('\u{FFFD}'));
+    }
 }
