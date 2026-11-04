@@ -54,6 +54,10 @@ name = "chat_stream"
 path = "examples/chat_stream.rs"
 
 [[example]]
+name = "reasoning"
+path = "examples/reasoning.rs"
+
+[[example]]
 name = "tools"
 path = "examples/tools.rs"
 

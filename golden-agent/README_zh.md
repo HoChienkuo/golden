@@ -50,6 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [x] 流式 / 非流式对话
 - [x] OpenAI 兼容协议（OpenAI、DeepSeek、llama.cpp、Ollama）
 - [x] `#[tool]` 工具声明、注册与按 provider 渲染
+- [x] 思考模式（DeepSeek `thinking`、OpenAI `reasoning_effort`、Anthropic 扩展思考）
 - [x] Anthropic Messages API
 - [ ] Google Gemini API
 - [x] 字符串模板 / prompt 模板

@@ -39,6 +39,17 @@ pub struct CheckpointMessage {
     /// The id of the tool call this message responds to (tool messages).
     pub tool_call_id: Option<String>,
 
+    /// The reasoning (thinking) the model produced (assistant messages).
+    ///
+    /// Persisted so that later turns (and runs) can replay it to providers that
+    /// require it alongside tool calls.
+    #[serde(default)]
+    pub reasoning: Option<String>,
+
+    /// The provider's opaque signature for [`Self::reasoning`], if any.
+    #[serde(default)]
+    pub reasoning_signature: Option<String>,
+
     /// The creation timestamp (unix seconds).
     pub created_at: i64,
 
@@ -67,6 +78,8 @@ impl CheckpointMessage {
             content: message.content,
             tool_calls: message.tool_calls,
             tool_call_id: message.tool_call_id,
+            reasoning: message.reasoning,
+            reasoning_signature: message.reasoning_signature,
             created_at,
             is_context: true,
         }
@@ -88,6 +101,8 @@ impl CheckpointMessage {
             content: msg.content.clone(),
             tool_calls: msg.tool_calls.clone(),
             tool_call_id: msg.tool_call_id.clone(),
+            reasoning: msg.reasoning.clone(),
+            reasoning_signature: msg.reasoning_signature.clone(),
             created_at: msg.created_at.unwrap_or_else(|| {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -111,6 +126,8 @@ impl From<CheckpointMessage> for Message {
             name: None,
             tool_calls: stored.tool_calls,
             tool_call_id: stored.tool_call_id,
+            reasoning: stored.reasoning,
+            reasoning_signature: stored.reasoning_signature,
             id: Some(stored.id),
             run_id: Some(stored.run_id),
             is_context: stored.is_context,

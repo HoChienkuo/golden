@@ -59,6 +59,11 @@ impl Default for AgentConfig {
 /// An event from a streaming agent run.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
+    /// A chunk of the model's reasoning (thinking) output.
+    ///
+    /// Emitted only when the agent's request enables reasoning and the model
+    /// streams it. Each step's thinking arrives before that step's text.
+    Reasoning(String),
     /// A chunk of assistant text.
     Text(String),
     /// A tool call the model requested.
@@ -252,11 +257,16 @@ impl Agent {
                 step_request.tools = tools.specs();
 
                 let mut text = String::new();
+                let mut reasoning = String::new();
                 let mut tool_calls: Vec<ToolCall> = Vec::new();
 
                 let mut stream = model.chat_stream(&step_request);
                 while let Some(item) = stream.next().await {
                     match item {
+                        Ok(ChatEvent::Reasoning(delta)) => {
+                            reasoning.push_str(&delta);
+                            yield Ok(AgentEvent::Reasoning(delta));
+                        }
                         Ok(ChatEvent::Text(delta)) => {
                             text.push_str(&delta);
                             yield Ok(AgentEvent::Text(delta));
@@ -269,9 +279,11 @@ impl Agent {
                     }
                 }
 
-                state
-                    .messages
-                    .push(Message::assistant(text).tool_calls(tool_calls.clone()));
+                let mut message = Message::assistant(text).tool_calls(tool_calls.clone());
+                if !reasoning.is_empty() {
+                    message.reasoning = Some(reasoning);
+                }
+                state.messages.push(message);
 
                 for middleware in &middlewares {
                     if let Err(error) = middleware.after_model(&mut state).await {

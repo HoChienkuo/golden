@@ -214,7 +214,8 @@ impl<S> AnthropicSseStream<S> {
         );
     }
 
-    /// Pushes a text delta or appends to the open tool-use block's arguments.
+    /// Pushes a text/thinking delta or appends to the open tool-use block's
+    /// arguments.
     fn push_delta(&mut self, value: &Value) {
         let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
         let delta = value.get("delta");
@@ -230,6 +231,16 @@ impl<S> AnthropicSseStream<S> {
                     .unwrap_or_default();
                 if !text.is_empty() {
                     self.pending.push_back(ChatEvent::Text(text.to_string()));
+                }
+            }
+            Some("thinking_delta") => {
+                let thinking = delta
+                    .and_then(|delta| delta.get("thinking"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !thinking.is_empty() {
+                    self.pending
+                        .push_back(ChatEvent::Reasoning(thinking.to_string()));
                 }
             }
             Some("input_json_delta") => {

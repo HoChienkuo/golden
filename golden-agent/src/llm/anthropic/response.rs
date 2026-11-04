@@ -24,8 +24,8 @@ pub struct MessagesResponse {
 /// A content block in a response message.
 ///
 /// Only the block types this crate consumes are modeled; every other type
-/// (`thinking`, server tool results, ...) deserializes to [`OutputBlock::Other`]
-/// and is ignored.
+/// (server tool results, redacted thinking, ...) deserializes to
+/// [`OutputBlock::Other`] and is ignored.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputBlock {
@@ -33,6 +33,14 @@ pub enum OutputBlock {
     Text {
         /// The text.
         text: String,
+    },
+    /// The model's thinking, produced when extended thinking is enabled.
+    Thinking {
+        /// The thinking text.
+        thinking: String,
+        /// The opaque signature that must be handed back on the next turn.
+        #[serde(default)]
+        signature: String,
     },
     /// A tool invocation requested by the model.
     ToolUse {

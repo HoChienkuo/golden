@@ -12,8 +12,8 @@ pub use message::{
 };
 pub use models::OpenAiModel;
 pub use request::{
-    AudioFormat, AudioOutput, ChatRequest, JsonSchema, Modality, ReasoningEffort, ResponseFormat,
-    ServiceTier, Stop, StreamOptions,
+    AudioFormat, AudioOutput, ChatRequest, Effort, JsonSchema, Modality, ResponseFormat,
+    ServiceTier, Stop, StreamOptions, Thinking, ThinkingMode,
 };
 pub use response::{
     Annotation, ChatResponse, Choice, ChoiceLogprobs, CompletionTokensDetails, PromptTokensDetails,

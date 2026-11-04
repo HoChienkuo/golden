@@ -35,6 +35,58 @@ pub struct MessagesRequest {
     /// Whether to stream the response with server-sent events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    /// Extended thinking switch. When enabled, the model thinks before it
+    /// answers and returns `thinking` content blocks.
+    ///
+    /// DeepSeek accepts `enabled` / `disabled` here and ignores the
+    /// `budget_tokens` that Anthropic uses; the thinking intensity comes from
+    /// [`Self::output_config`] instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<Thinking>,
+    /// Output tuning, including the thinking effort level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_config: Option<OutputConfig>,
+}
+
+/// The `thinking` object of a Messages API request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Thinking {
+    /// Extended thinking, with a budget of `budget_tokens` tokens.
+    ///
+    /// Anthropic uses the budget to size its thinking; providers that expose a
+    /// discrete effort scale (DeepSeek) ignore it.
+    Enabled {
+        /// The maximum number of tokens Claude may spend thinking.
+        budget_tokens: u32,
+    },
+    /// Thinking is switched off.
+    Disabled,
+}
+
+/// The `output_config` object of a Messages API request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct OutputConfig {
+    /// How hard the model should think before answering.
+    ///
+    /// Only `effort` is supported; DeepSeek reads `low` / `high` / `max`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
+}
+
+/// The thinking effort levels `output_config.effort` accepts.
+///
+/// DeepSeek documents `low` / `high` / `max`; the neutral `medium` level is
+/// folded into `high` before it reaches the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effort {
+    /// Low thinking effort.
+    Low,
+    /// High thinking effort (the provider default).
+    High,
+    /// Maximum thinking effort.
+    Max,
 }
 
 /// A single input message.
@@ -79,6 +131,13 @@ pub enum ContentBlock {
         name: String,
         /// The tool input, as produced by the model.
         input: Value,
+    },
+    /// A thinking block produced by the model, echoed back on an assistant turn.
+    Thinking {
+        /// The thinking text.
+        thinking: String,
+        /// The opaque signature that must be returned unchanged.
+        signature: String,
     },
     /// The result of a tool invocation, sent on a user turn.
     ToolResult {

@@ -144,6 +144,12 @@ impl<S> SseLineStream<S> {
     /// Merges a parsed chunk into the pending events and tool-call buffers.
     fn handle_chunk(&mut self, chunk: StreamData) {
         for choice in chunk.choices {
+            if let Some(reasoning) = choice.delta.reasoning_content
+                && !reasoning.is_empty()
+            {
+                self.pending.push_back(ChatEvent::Reasoning(reasoning));
+            }
+
             let content = choice.delta.content.unwrap_or_default();
             if !content.is_empty() {
                 self.pending.push_back(ChatEvent::Text(content));
@@ -256,6 +262,10 @@ struct StreamDeltaChoice {
 struct StreamDeltaContent {
     #[serde(default)]
     content: Option<String>,
+    /// The reasoning (thinking) delta, sent by DeepSeek and other
+    /// OpenAI-compatible reasoning providers.
+    #[serde(default)]
+    reasoning_content: Option<String>,
     #[serde(default)]
     tool_calls: Vec<StreamToolCall>,
 }

@@ -24,19 +24,48 @@ pub(crate) enum DatabaseTransaction<'a, 'c> {
 }
 
 /// Executes the statements in a database schema definition.
+///
+/// Statements are executed in order and the whole schema is idempotent, so
+/// calling this again on an existing database upgrades it.
 pub(crate) async fn migrate(pool: DatabasePool<'_>, ddl: &'static str) -> Result<(), Error> {
     for statement in ddl.split(';').map(str::trim).filter(|sql| !sql.is_empty()) {
-        match pool {
-            #[cfg(feature = "persistence-mysql")]
-            DatabasePool::MySql(pool) => sqlx::query(statement).execute(pool).await.map(|_| ()),
-            #[cfg(feature = "persistence-postgres")]
-            DatabasePool::Postgres(pool) => sqlx::query(statement).execute(pool).await.map(|_| ()),
-            #[cfg(feature = "persistence-sqlite")]
-            DatabasePool::Sqlite(pool) => sqlx::query(statement).execute(pool).await.map(|_| ()),
+        if let Some(error) = execute(pool, statement).await.err() {
+            // Re-running the migration re-executes additive `ALTER TABLE ADD
+            // COLUMN` statements, which fail once the column exists.
+            if !is_duplicate_column(&error) {
+                return Err(error);
+            }
         }
-        .map_err(persistence)?;
     }
     Ok(())
+}
+
+/// Executes one schema statement.
+async fn execute(pool: DatabasePool<'_>, statement: &str) -> Result<(), Error> {
+    // Statements come from the crate's own DDL files, so they are safe to
+    // run as dynamic SQL.
+    let statement = sqlx::AssertSqlSafe(statement.to_string());
+    match pool {
+        #[cfg(feature = "persistence-mysql")]
+        DatabasePool::MySql(pool) => sqlx::query(statement).execute(pool).await.map(|_| ()),
+        #[cfg(feature = "persistence-postgres")]
+        DatabasePool::Postgres(pool) => sqlx::query(statement).execute(pool).await.map(|_| ()),
+        #[cfg(feature = "persistence-sqlite")]
+        DatabasePool::Sqlite(pool) => sqlx::query(statement).execute(pool).await.map(|_| ()),
+    }
+    .map_err(persistence)
+}
+
+/// Whether an error means the column an `ALTER TABLE` tried to add already
+/// exists, so the migration can be treated as applied.
+fn is_duplicate_column(error: &Error) -> bool {
+    let Error::Persistence { message } = error else {
+        return false;
+    };
+    let message = message.to_ascii_lowercase();
+    message.contains("duplicate column")
+        || message.contains("column already exists")
+        || message.contains("duplicate_column_name")
 }
 
 /// Returns the next sequence number for a thread.
@@ -84,6 +113,8 @@ macro_rules! insert_message {
             .bind($content)
             .bind($tool_calls)
             .bind(&$message.tool_call_id)
+            .bind(&$message.reasoning)
+            .bind(&$message.reasoning_signature)
             .bind($message.created_at)
             .bind(flag($message.is_context))
             .execute(&mut **$tx)
@@ -105,7 +136,8 @@ pub(crate) async fn insert_message(
         DatabaseTransaction::MySql(tx) => insert_message!(
             tx,
             "INSERT INTO messages (id, thread_id, run_id, seq, role, content, tool_calls, \
-             tool_call_id, created_at, is_context) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             tool_call_id, reasoning, reasoning_signature, created_at, is_context) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             message,
             content,
             tool_calls
@@ -114,8 +146,8 @@ pub(crate) async fn insert_message(
         DatabaseTransaction::Postgres(tx) => insert_message!(
             tx,
             "INSERT INTO messages (id, thread_id, run_id, seq, role, content, tool_calls, \
-             tool_call_id, created_at, is_context) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+             tool_call_id, reasoning, reasoning_signature, created_at, is_context) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
             message,
             content,
             tool_calls
@@ -124,7 +156,8 @@ pub(crate) async fn insert_message(
         DatabaseTransaction::Sqlite(tx) => insert_message!(
             tx,
             "INSERT INTO messages (id, thread_id, run_id, seq, role, content, tool_calls, \
-             tool_call_id, created_at, is_context) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             tool_call_id, reasoning, reasoning_signature, created_at, is_context) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             message,
             content,
             tool_calls
@@ -158,6 +191,8 @@ pub(crate) struct MessageRow {
     pub content: String,
     pub tool_calls: Option<String>,
     pub tool_call_id: Option<String>,
+    pub reasoning: Option<String>,
+    pub reasoning_signature: Option<String>,
     pub created_at: i64,
     pub is_context: i64,
 }
@@ -173,6 +208,8 @@ pub(crate) fn row_to_message(row: MessageRow) -> Result<CheckpointMessage, Error
         content,
         tool_calls,
         tool_call_id,
+        reasoning,
+        reasoning_signature,
         created_at,
         is_context,
     } = row;
@@ -188,6 +225,8 @@ pub(crate) fn row_to_message(row: MessageRow) -> Result<CheckpointMessage, Error
             None => Vec::new(),
         },
         tool_call_id,
+        reasoning,
+        reasoning_signature,
         created_at,
         is_context: is_context != 0,
     })

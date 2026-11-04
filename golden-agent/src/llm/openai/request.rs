@@ -75,7 +75,14 @@ pub struct ChatRequest {
     pub parallel_tool_calls: Option<bool>,
     /// Constrains the reasoning effort for reasoning models.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning_effort: Option<Effort>,
+    /// Enables or disables thinking, for providers that model it as an object
+    /// field at the top level of the request (DeepSeek's `thinking`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<Thinking>,
+    /// Provider-specific extra request fields, merged into the request body.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<serde_json::Map<String, Value>>,
     /// The output modalities to enable, e.g. `["text", "audio"]`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modalities: Option<Vec<Modality>>,
@@ -159,14 +166,54 @@ pub struct JsonSchema {
     pub strict: Option<bool>,
 }
 
-/// The reasoning effort level for reasoning models.
+/// The `reasoning_effort` values this wire format sends.
+///
+/// DeepSeek documents `none`, `low`, `high`, `max`; the neutral `medium` level
+/// is folded into `high` before it reaches the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ReasoningEffort {
-    Minimal,
+pub enum Effort {
+    /// Thinking off.
+    None,
+    /// Low thinking effort.
     Low,
-    Medium,
+    /// High thinking effort (the provider default).
     High,
+    /// Maximum thinking effort.
+    Max,
+}
+
+impl From<crate::llm::chat::ReasoningEffort> for Effort {
+    /// Folds the neutral ladder onto the wire values.
+    ///
+    /// DeepSeek maps `minimal` / `low` → `low` and `medium` / `xhigh` → `high`,
+    /// so the neutral `medium` level is folded into `high` rather than sent.
+    fn from(effort: crate::llm::chat::ReasoningEffort) -> Self {
+        match effort {
+            crate::llm::chat::ReasoningEffort::Low => Effort::Low,
+            crate::llm::chat::ReasoningEffort::Medium => Effort::High,
+            crate::llm::chat::ReasoningEffort::High => Effort::High,
+            crate::llm::chat::ReasoningEffort::Max => Effort::Max,
+        }
+    }
+}
+
+/// The `thinking` object DeepSeek accepts at the top level of a request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Thinking {
+    /// The thinking mode, serialized as `"enabled"` / `"disabled"`.
+    #[serde(rename = "type")]
+    pub mode: ThinkingMode,
+}
+
+/// The state of a provider's thinking switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThinkingMode {
+    /// Think before answering.
+    Enabled,
+    /// Answer directly.
+    Disabled,
 }
 
 /// An output modality.
@@ -242,6 +289,8 @@ impl ChatRequest {
             tool_choice: None,
             parallel_tool_calls: None,
             reasoning_effort: None,
+            thinking: None,
+            extra: None,
             modalities: None,
             audio: None,
             prediction: None,
@@ -378,8 +427,23 @@ impl ChatRequest {
     }
 
     /// Sets the reasoning effort.
-    pub fn reasoning_effort(mut self, value: ReasoningEffort) -> Self {
+    pub fn reasoning_effort(mut self, value: Effort) -> Self {
         self.reasoning_effort = Some(value);
+        self
+    }
+
+    /// Sets the top-level `thinking` switch.
+    pub fn thinking(mut self, value: Thinking) -> Self {
+        self.thinking = Some(value);
+        self
+    }
+
+    /// Merges provider-specific fields into the request body.
+    ///
+    /// The entries are serialized as siblings of the standard fields, so a key
+    /// of `"chat_template_kwargs"` lands next to `"messages"`.
+    pub fn extra(mut self, value: serde_json::Map<String, Value>) -> Self {
+        self.extra = Some(value);
         self
     }
 

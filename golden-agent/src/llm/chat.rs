@@ -15,6 +15,11 @@ use crate::tool::ToolSpec;
 /// emits a complete [`ChatEvent::ToolCall`] once the call is finished.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatEvent {
+    /// A chunk of the model's reasoning (thinking) output.
+    ///
+    /// Only emitted when the request asked for reasoning and the provider
+    /// streams it; it always arrives before the corresponding [`Self::Text`].
+    Reasoning(String),
     /// A chunk of assistant text.
     Text(String),
     /// A tool call the model finished streaming.
@@ -159,6 +164,23 @@ pub struct Message {
     /// The id of the tool call this message responds to (tool messages).
     pub tool_call_id: Option<String>,
 
+    /// The reasoning (thinking) content produced by the model.
+    ///
+    /// Assistant messages only, and only when the request enabled reasoning.
+    /// Providers that require it (Anthropic) round-trip this back with the
+    /// message; OpenAI-compatible providers require it to be echoed alongside
+    /// tool calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+
+    /// The provider's opaque signature for [`Message::reasoning`], if any.
+    ///
+    /// Anthropic signs thinking blocks and rejects a turn that replays them
+    /// without the matching signature; OpenAI-compatible providers leave this
+    /// unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_signature: Option<String>,
+
     /// The persistence id of this message, once it has been stored.
     ///
     /// `None` for messages that have not been persisted yet. Set by
@@ -191,6 +213,8 @@ impl Message {
             name: None,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            reasoning: None,
+            reasoning_signature: None,
             id: None,
             run_id: None,
             is_context: true,
@@ -235,6 +259,23 @@ impl Message {
     /// Sets the id of the tool call this message responds to.
     pub fn tool_call_id(mut self, tool_call_id: impl Into<String>) -> Self {
         self.tool_call_id = Some(tool_call_id.into());
+        self
+    }
+
+    /// Sets the reasoning (thinking) content of an assistant message.
+    pub fn reasoning(mut self, reasoning: impl Into<String>) -> Self {
+        self.reasoning = Some(reasoning.into());
+        self
+    }
+
+    /// Returns the reasoning content of this message, if any.
+    pub fn reasoning_text(&self) -> Option<&str> {
+        self.reasoning.as_deref()
+    }
+
+    /// Sets the provider's opaque signature for the reasoning content.
+    pub fn reasoning_signature(mut self, signature: impl Into<String>) -> Self {
+        self.reasoning_signature = Some(signature.into());
         self
     }
 
@@ -290,6 +331,76 @@ pub enum ResponseFormat {
     },
 }
 
+/// How much reasoning (thinking) the model should produce before answering.
+///
+/// Reasoning-capable models think before they answer. Providers expose the
+/// switch differently — DeepSeek takes a `thinking: {type}` object plus a
+/// `reasoning_effort` level, Anthropic takes a token budget — and each provider
+/// maps the variants it supports, in the order `Budget` → `Effort` →
+/// `Enabled`/`Disabled`. Providers without a reasoning switch ignore the setting.
+///
+/// Leaving [`ChatRequest::reasoning`] unset sends nothing at all, so the
+/// provider default applies (DeepSeek thinks by default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Reasoning {
+    /// Do not think before answering.
+    #[default]
+    Disabled,
+    /// Think with the provider's default intensity.
+    Enabled,
+    /// Think with a fixed effort level.
+    Effort(ReasoningEffort),
+    /// Think within a token budget of at most this many tokens.
+    ///
+    /// Providers without a budget concept fall back to [`Reasoning::Effort`].
+    Budget(u32),
+}
+
+/// Per-token reasoning effort levels, ordered from least to most effort.
+///
+/// DeepSeek documents the scale as `low` / `high` / `max` (with `minimal` folded
+/// into `low`, and legacy `medium` / `xhigh` folded into `high`). This ladder is
+/// the documented one; [`ReasoningEffort::Medium`] is sent to providers that
+/// accept it and folded into `high` for DeepSeek.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReasoningEffort {
+    /// Lowest thinking effort (DeepSeek's `low`).
+    Low,
+    /// The level between low and high, for providers that name one.
+    Medium,
+    /// High thinking effort, the default when thinking is on.
+    High,
+    /// Maximum thinking effort.
+    Max,
+}
+
+impl Reasoning {
+    /// Returns the effort level this setting asks for, if it maps to one.
+    ///
+    /// Budgets are mapped onto a level so that providers with discrete effort
+    /// settings can still honor a budget: up to 2K tokens is [`ReasoningEffort::Low`],
+    /// up to 8K is [`ReasoningEffort::Medium`], and anything above that is
+    /// [`ReasoningEffort::High`]. Providers with a native budget concept
+    /// (Anthropic's `thinking.budget_tokens`) use the budget directly.
+    pub fn effort(&self) -> Option<ReasoningEffort> {
+        match self {
+            Self::Disabled => None,
+            Self::Enabled => Some(ReasoningEffort::High),
+            Self::Effort(effort) => Some(*effort),
+            Self::Budget(tokens) => Some(match tokens {
+                0..=2048 => ReasoningEffort::Low,
+                2049..=8192 => ReasoningEffort::Medium,
+                _ => ReasoningEffort::High,
+            }),
+        }
+    }
+
+    /// Returns whether reasoning is switched on.
+    pub fn is_enabled(&self) -> bool {
+        *self != Self::Disabled
+    }
+}
+
 /// A chat completion request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatRequest {
@@ -311,6 +422,10 @@ pub struct ChatRequest {
     pub stop: Option<Vec<String>>,
     /// The required format of the model's output.
     pub response_format: Option<ResponseFormat>,
+    /// How much the model should reason before answering.
+    ///
+    /// `None` leaves the provider default untouched.
+    pub reasoning: Option<Reasoning>,
 }
 
 impl ChatRequest {
@@ -326,6 +441,7 @@ impl ChatRequest {
             max_tokens: None,
             stop: None,
             response_format: None,
+            reasoning: None,
         }
     }
 
@@ -382,6 +498,23 @@ impl ChatRequest {
         self.response_format = Some(format);
         self
     }
+
+    /// Sets how much the model should reason before answering.
+    ///
+    /// ```
+    /// use golden_agent::{ChatRequest, Reasoning};
+    ///
+    /// // DeepSeek-style on/off switch, and an OpenAI-style effort level.
+    /// let on = ChatRequest::new("model").reasoning(Reasoning::Enabled);
+    /// let deep = ChatRequest::new("model").reasoning(Reasoning::Budget(16_000));
+    ///
+    /// assert!(on.reasoning.is_some_and(|r| r.is_enabled()));
+    /// assert_eq!(deep.reasoning, Some(Reasoning::Budget(16_000)));
+    /// ```
+    pub fn reasoning(mut self, reasoning: Reasoning) -> Self {
+        self.reasoning = Some(reasoning);
+        self
+    }
 }
 
 /// A chat completion response.
@@ -403,6 +536,13 @@ impl ChatResponse {
     /// Returns the assistant's text, or an empty string.
     pub fn text(&self) -> &str {
         self.message.text()
+    }
+
+    /// Returns the model's reasoning content, or an empty string.
+    ///
+    /// Empty when reasoning was not enabled or the provider did not return it.
+    pub fn reasoning(&self) -> &str {
+        self.message.reasoning.as_deref().unwrap_or("")
     }
 
     /// Deserializes the assistant text into `T`.
@@ -476,6 +616,8 @@ pub struct Usage {
     pub completion_tokens: u32,
     /// The total number of tokens used.
     pub total_tokens: u32,
+    /// The number of completion tokens spent on reasoning.
+    pub reasoning_tokens: Option<u32>,
 }
 
 fn default_true() -> bool {

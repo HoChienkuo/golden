@@ -1,16 +1,23 @@
 use serde_json::Value;
 
 use crate::llm::chat::{
-    ChatRequest, ChatResponse, Content, ContentPart, FinishReason, Message, Role, ToolCall,
-    ToolChoice, Usage,
+    ChatRequest, ChatResponse, Content, ContentPart, FinishReason, Message, Reasoning,
+    ReasoningEffort, Role, ToolCall, ToolChoice, Usage,
 };
 use crate::tool::FromToolSpec;
 
 use super::request::{
-    ContentBlock, ImageSource, InputMessage, MessagesRequest, Role as AnthropicRole,
+    ContentBlock, Effort, ImageSource, InputMessage, MessagesRequest, OutputConfig,
+    Role as AnthropicRole, Thinking,
 };
 use super::response::{MessagesResponse, OutputBlock};
 use super::tool::{Tool, ToolChoice as AnthropicToolChoice};
+
+/// Anthropic's minimum extended-thinking budget.
+const MIN_THINKING_BUDGET: u32 = 1024;
+/// The extended-thinking budget used for [`Reasoning::Enabled`], and for effort
+/// levels when the provider only understands a budget.
+const DEFAULT_THINKING_BUDGET: u32 = 4096;
 
 /// Translates a neutral [`ChatRequest`] into a Messages API request.
 ///
@@ -37,17 +44,59 @@ pub(crate) fn build_request(
         top_p: request.top_p,
         stop_sequences: request.stop.clone(),
         stream: stream.then_some(true),
+        thinking: request.reasoning.map(|reasoning| match reasoning {
+            Reasoning::Disabled => Thinking::Disabled,
+            Reasoning::Budget(tokens) => Thinking::Enabled {
+                budget_tokens: tokens.clamp(MIN_THINKING_BUDGET, u32::MAX),
+            },
+            Reasoning::Enabled | Reasoning::Effort(_) => Thinking::Enabled {
+                budget_tokens: DEFAULT_THINKING_BUDGET,
+            },
+        }),
+        output_config: request
+            .reasoning
+            .and_then(|reasoning| reasoning.effort())
+            .map(|effort| OutputConfig {
+                effort: Some(to_effort(effort)),
+            }),
+    }
+}
+
+/// Maps a neutral effort level onto `output_config.effort`'s scale.
+///
+/// DeepSeek folds `medium` into `high`, so the neutral middle level does not
+/// reach the wire.
+fn to_effort(effort: ReasoningEffort) -> Effort {
+    match effort {
+        ReasoningEffort::Low => Effort::Low,
+        ReasoningEffort::Medium | ReasoningEffort::High => Effort::High,
+        ReasoningEffort::Max => Effort::Max,
     }
 }
 
 /// Translates a Messages API response into a neutral [`ChatResponse`].
 pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
     let mut text = String::new();
+    let mut reasoning = String::new();
+    let mut signature = None;
+    let mut has_signed_thinking = false;
     let mut tool_calls: Vec<ToolCall> = Vec::new();
 
     for block in response.content {
         match block {
             OutputBlock::Text { text: value } => text.push_str(&value),
+            OutputBlock::Thinking {
+                thinking,
+                signature: block_signature,
+            } => {
+                // A signature marks a complete, replayable thinking block; a
+                // streamed response that was cut short has none.
+                if !block_signature.is_empty() {
+                    reasoning.push_str(&thinking);
+                    signature = Some(block_signature);
+                    has_signed_thinking = true;
+                }
+            }
             OutputBlock::ToolUse { id, name, input } => tool_calls.push(ToolCall {
                 id,
                 name,
@@ -66,6 +115,8 @@ pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
             name: None,
             tool_calls,
             tool_call_id: None,
+            reasoning: has_signed_thinking.then_some(reasoning),
+            reasoning_signature: signature,
             id: None,
             run_id: None,
             is_context: true,
@@ -76,6 +127,7 @@ pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
             prompt_tokens: response.usage.input_tokens,
             completion_tokens: response.usage.output_tokens,
             total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+            reasoning_tokens: None,
         }),
     }
 }
@@ -135,9 +187,21 @@ fn user_content(content: &Content) -> Vec<ContentBlock> {
     }
 }
 
-/// Builds the content blocks of an assistant turn: text plus any tool calls.
+/// Builds the content blocks of an assistant turn: the signed thinking block
+/// first (Anthropic requires thinking to lead the turn it produced), then the
+/// text and any tool calls.
+///
+/// Thinking is only replayed when its signature is known; unsigned reasoning
+/// (from streaming, which does not surface the signature) is dropped.
 fn assistant_content(message: &Message) -> Vec<ContentBlock> {
     let mut blocks = Vec::new();
+
+    if let (Some(thinking), Some(signature)) = (&message.reasoning, &message.reasoning_signature) {
+        blocks.push(ContentBlock::Thinking {
+            thinking: thinking.clone(),
+            signature: signature.clone(),
+        });
+    }
 
     let text = message.content.text();
     if !text.is_empty() {
@@ -180,4 +244,54 @@ fn parse_finish_reason(reason: &str) -> FinishReason {
 /// Anthropic's temperature range is 0.0 to 1.0, narrower than OpenAI's.
 fn clamp_temperature(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::chat::{Message, Reasoning, ReasoningEffort};
+
+    fn body(reasoning: Option<Reasoning>) -> serde_json::Value {
+        let mut request = ChatRequest::new("deepseek-flash").add_message(Message::user("hi"));
+        request.reasoning = reasoning;
+        serde_json::to_value(build_request(&request, false, 4096)).unwrap()
+    }
+
+    #[test]
+    fn reasoning_unset_sends_no_thinking_fields() {
+        let body = body(None);
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn disabled_sends_switched_off_thinking() {
+        let body = body(Some(Reasoning::Disabled));
+        assert_eq!(body["thinking"], serde_json::json!({"type": "disabled"}));
+        assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn effort_goes_to_output_config() {
+        let cases = [
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::Medium, "high"),
+            (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Max, "max"),
+        ];
+        for (effort, expected) in cases {
+            let body = body(Some(Reasoning::Effort(effort)));
+            assert_eq!(body["thinking"]["type"], "enabled");
+            assert_eq!(
+                body["output_config"],
+                serde_json::json!({ "effort": expected })
+            );
+        }
+    }
+
+    #[test]
+    fn budget_sets_thinking_budget_tokens() {
+        let body = body(Some(Reasoning::Budget(8_000)));
+        assert_eq!(body["thinking"]["budget_tokens"], 8_000);
+    }
 }

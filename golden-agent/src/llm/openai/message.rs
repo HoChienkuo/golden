@@ -151,6 +151,11 @@ pub struct Message {
     pub tool_calls: Option<Vec<ToolCall>>,
     /// The id of the tool call this message responds to (tool messages).
     pub tool_call_id: Option<String>,
+    /// The reasoning (thinking) the model produced (assistant messages).
+    ///
+    /// Sent back as `reasoning_content` on assistant turns, which providers
+    /// that stream thinking require alongside tool calls.
+    pub reasoning_content: Option<String>,
     /// The name and arguments of a function the model called.
     #[deprecated(note = "deprecated by OpenAI; use `tool_calls` instead")]
     pub function_call: Option<FunctionCall>,
@@ -165,6 +170,7 @@ impl Message {
             name: None,
             tool_calls: None,
             tool_call_id: None,
+            reasoning_content: None,
             function_call: None,
         }
     }
@@ -208,6 +214,12 @@ impl Message {
         self.tool_call_id = Some(tool_call_id.into());
         self
     }
+
+    /// Sets the reasoning content to send back with an assistant message.
+    pub fn reasoning_content(mut self, reasoning: impl Into<String>) -> Self {
+        self.reasoning_content = Some(reasoning.into());
+        self
+    }
 }
 
 #[allow(deprecated)]
@@ -221,6 +233,9 @@ impl Serialize for Message {
             len += 1;
         }
         if self.tool_call_id.is_some() {
+            len += 1;
+        }
+        if self.reasoning_content.is_some() {
             len += 1;
         }
         if self.function_call.is_some() {
@@ -238,6 +253,9 @@ impl Serialize for Message {
         }
         if let Some(tool_call_id) = &self.tool_call_id {
             map.serialize_entry("tool_call_id", tool_call_id)?;
+        }
+        if let Some(reasoning) = &self.reasoning_content {
+            map.serialize_entry("reasoning_content", reasoning)?;
         }
         if let Some(function_call) = &self.function_call {
             map.serialize_entry("function_call", function_call)?;

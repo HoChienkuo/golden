@@ -36,6 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while let Some(event) = stream.next().await {
         match event? {
+            AgentEvent::Reasoning(thinking) => print!("\x1b[2m{thinking}\x1b[0m"),
             AgentEvent::Text(text) => print!("{text}"),
             AgentEvent::ToolCall(call) => println!("\n[tool] {}({})", call.name, call.arguments),
             AgentEvent::ToolResult { call, content } => {

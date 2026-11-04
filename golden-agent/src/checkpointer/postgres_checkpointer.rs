@@ -44,7 +44,7 @@ impl Checkpointer for PostgresCheckpointer {
         let rows = sqlx::query_as::<_, MessageRow>(
             r#"
             SELECT id, thread_id, run_id, seq, role, content,
-                   tool_calls, tool_call_id, created_at,
+                   tool_calls, tool_call_id, reasoning, reasoning_signature, created_at,
                    is_context
             FROM messages
             WHERE thread_id = $1 AND is_context = TRUE
