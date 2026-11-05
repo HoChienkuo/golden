@@ -124,19 +124,38 @@ fn to_wire_message(message: &Message) -> WireMessage {
         Role::System => WireMessage::system(message.text()),
         Role::User => WireMessage::user(to_wire_content(&message.content)),
         Role::Assistant => {
-            let mut wire = WireMessage::assistant(message.text());
-            if !message.tool_calls.is_empty() {
-                wire = wire.tool_calls(message.tool_calls.iter().map(to_wire_tool_call));
+            let mut wire = WireMessage::assistant(flatten_text_parts(message));
+            let part_calls: Vec<_> = message
+                .content
+                .parts()
+                .into_iter()
+                .flatten()
+                .filter_map(|part| match part {
+                    ContentPart::ToolCall(call) => Some(call),
+                    _ => None,
+                })
+                .collect();
+            if part_calls.is_empty() {
+                if !message.tool_calls.is_empty() {
+                    wire = wire.tool_calls(message.tool_calls.iter().map(to_wire_tool_call));
+                }
+            } else {
+                wire = wire.tool_calls(part_calls.into_iter().map(to_wire_tool_call));
             }
-            if let Some(reasoning) = &message.reasoning {
-                wire = wire.reasoning_content(reasoning.clone());
+            if let Some(reasoning) = flatten_reasoning_parts(message) {
+                wire = wire.reasoning_content(reasoning);
             }
             wire
         }
-        Role::Tool => WireMessage::tool(
-            message.tool_call_id.clone().unwrap_or_default(),
-            message.text(),
-        ),
+        Role::Tool => {
+            let (tool_call_id, content) = first_tool_result(message).unwrap_or_else(|| {
+                (
+                    message.tool_call_id.clone().unwrap_or_default(),
+                    message.text().to_string(),
+                )
+            });
+            WireMessage::tool(tool_call_id, content)
+        }
     };
 
     if let Some(name) = &message.name {
@@ -146,20 +165,66 @@ fn to_wire_message(message: &Message) -> WireMessage {
     wire
 }
 
+fn first_tool_result(message: &Message) -> Option<(String, String)> {
+    message.content.parts()?.iter().find_map(|part| match part {
+        ContentPart::ToolResult {
+            tool_call_id,
+            content,
+            ..
+        } => Some((tool_call_id.clone(), content.clone())),
+        _ => None,
+    })
+}
+
+fn flatten_text_parts(message: &Message) -> String {
+    match &message.content {
+        Content::Text(text) => text.clone(),
+        Content::Parts(parts) => parts
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect(),
+    }
+}
+
+fn flatten_reasoning_parts(message: &Message) -> Option<String> {
+    match &message.content {
+        Content::Parts(parts) => {
+            let reasoning: String = parts
+                .iter()
+                .filter_map(|part| match part {
+                    ContentPart::Reasoning { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            (!reasoning.is_empty()).then_some(reasoning)
+        }
+        Content::Text(_) => message.reasoning.clone(),
+    }
+}
+
 fn to_wire_content(content: &Content) -> WireContent {
     match content {
         Content::Text(text) => WireContent::Text(text.clone()),
         Content::Parts(parts) => WireContent::Parts(
             parts
                 .iter()
-                .map(|part| match part {
-                    ContentPart::Text { text } => WireContentPart::Text { text: text.clone() },
-                    ContentPart::ImageUrl { url } => WireContentPart::ImageUrl {
+                .filter_map(|part| match part {
+                    ContentPart::Text { text } => {
+                        Some(WireContentPart::Text { text: text.clone() })
+                    }
+                    ContentPart::ImageUrl { url } => Some(WireContentPart::ImageUrl {
                         image_url: ImageUrl {
                             url: url.clone(),
                             detail: None,
                         },
-                    },
+                    }),
+                    ContentPart::Reasoning { .. }
+                    | ContentPart::OpaqueReasoning { .. }
+                    | ContentPart::ToolCall(_)
+                    | ContentPart::ToolResult { .. } => None,
                 })
                 .collect(),
         ),
@@ -190,24 +255,27 @@ fn to_wire_tool_choice(choice: &ToolChoice) -> WireToolChoice {
 }
 
 fn from_wire_message(message: WireResponseMessage) -> Message {
-    Message {
-        role: Role::Assistant,
-        content: Content::Text(message.content().to_string()),
-        name: None,
-        tool_calls: message
+    let mut parts = Vec::new();
+    if let Some(reasoning) = message.reasoning_content {
+        parts.push(ContentPart::Reasoning {
+            text: reasoning,
+            signature: None,
+        });
+    }
+    if let Some(content) = message.content
+        && !content.is_empty()
+    {
+        parts.push(ContentPart::Text { text: content });
+    }
+    parts.extend(
+        message
             .tool_calls
             .unwrap_or_default()
             .into_iter()
             .map(from_wire_tool_call)
-            .collect(),
-        tool_call_id: None,
-        reasoning: message.reasoning_content,
-        reasoning_signature: None,
-        id: None,
-        run_id: None,
-        is_context: true,
-        created_at: None,
-    }
+            .map(ContentPart::ToolCall),
+    );
+    Message::parts(Role::Assistant, parts)
 }
 
 fn from_wire_tool_call(call: WireToolCall) -> ToolCall {

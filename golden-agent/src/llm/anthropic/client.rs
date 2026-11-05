@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::error::{ApiErrorBody, Error};
 use crate::llm::chat::{
-    ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, PartialToolCall,
+    ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, ContentPart, PartialToolCall,
 };
 use crate::llm::http::HttpConfig;
 
@@ -133,7 +133,7 @@ impl ChatModel for AnthropicLlm {
 
             let mut events = AnthropicSseStream {
                 inner: response.bytes_stream(),
-                buffer: String::new(),
+                buffer: Vec::new(),
                 done: false,
                 pending: VecDeque::new(),
                 blocks: BTreeMap::new(),
@@ -154,10 +154,32 @@ impl ChatModel for AnthropicLlm {
 /// complete [`ChatEvent::ToolCall`]s when the block closes.
 struct AnthropicSseStream<S> {
     inner: S,
-    buffer: String,
+    buffer: Vec<u8>,
     done: bool,
     pending: VecDeque<ChatEvent>,
-    blocks: BTreeMap<usize, PartialToolCall>,
+    blocks: BTreeMap<usize, PartialContentBlock>,
+}
+
+/// A content block being assembled from Anthropic SSE deltas.
+enum PartialContentBlock {
+    Text(String),
+    Reasoning {
+        text: String,
+        signature: Option<String>,
+    },
+    OpaqueReasoning(String),
+    ToolCall(PartialToolCall),
+}
+
+impl PartialContentBlock {
+    fn into_content_part(self) -> ContentPart {
+        match self {
+            Self::Text(text) => ContentPart::Text { text },
+            Self::Reasoning { text, signature } => ContentPart::Reasoning { text, signature },
+            Self::OpaqueReasoning(data) => ContentPart::OpaqueReasoning { data },
+            Self::ToolCall(call) => ContentPart::ToolCall(call.into_tool_call()),
+        }
+    }
 }
 
 impl<S> AnthropicSseStream<S> {
@@ -191,35 +213,55 @@ impl<S> AnthropicSseStream<S> {
         None
     }
 
-    /// Records a `tool_use` block that is about to stream its arguments.
+    /// Starts accumulating an ordered response content block.
     fn start_block(&mut self, value: &Value) {
-        let block = value.get("content_block");
-        if block
-            .and_then(|block| block.get("type"))
-            .and_then(Value::as_str)
-            != Some("tool_use")
-        {
+        let Some(block) = value.get("content_block") else {
             return;
-        }
-
+        };
         let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let id = block
-            .and_then(|block| block.get("id"))
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let name = block
-            .and_then(|block| block.get("name"))
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-
-        self.blocks.insert(
-            index,
-            PartialToolCall {
-                id: id.to_string(),
-                name: name.to_string(),
-                arguments: String::new(),
+        let partial = match block.get("type").and_then(Value::as_str) {
+            Some("text") => PartialContentBlock::Text(
+                block
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+            Some("thinking") => PartialContentBlock::Reasoning {
+                text: block
+                    .get("thinking")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                signature: block
+                    .get("signature")
+                    .and_then(Value::as_str)
+                    .filter(|signature| !signature.is_empty())
+                    .map(str::to_string),
             },
-        );
+            Some("redacted_thinking") => PartialContentBlock::OpaqueReasoning(
+                block
+                    .get("data")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+            Some("tool_use") => PartialContentBlock::ToolCall(PartialToolCall {
+                id: block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                name: block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                arguments: String::new(),
+            }),
+            _ => return,
+        };
+        self.blocks.insert(index, partial);
     }
 
     /// Pushes a text/thinking delta or appends to the open tool-use block's
@@ -237,6 +279,9 @@ impl<S> AnthropicSseStream<S> {
                     .and_then(|delta| delta.get("text"))
                     .and_then(Value::as_str)
                     .unwrap_or_default();
+                if let Some(PartialContentBlock::Text(block)) = self.blocks.get_mut(&index) {
+                    block.push_str(text);
+                }
                 if !text.is_empty() {
                     self.pending.push_back(ChatEvent::Text(text.to_string()));
                 }
@@ -246,6 +291,11 @@ impl<S> AnthropicSseStream<S> {
                     .and_then(|delta| delta.get("thinking"))
                     .and_then(Value::as_str)
                     .unwrap_or_default();
+                if let Some(PartialContentBlock::Reasoning { text, .. }) =
+                    self.blocks.get_mut(&index)
+                {
+                    text.push_str(thinking);
+                }
                 if !thinking.is_empty() {
                     self.pending
                         .push_back(ChatEvent::Reasoning(thinking.to_string()));
@@ -257,6 +307,13 @@ impl<S> AnthropicSseStream<S> {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 if !signature.is_empty() {
+                    if let Some(PartialContentBlock::Reasoning {
+                        signature: block_signature,
+                        ..
+                    }) = self.blocks.get_mut(&index)
+                    {
+                        *block_signature = Some(signature.to_string());
+                    }
                     self.pending
                         .push_back(ChatEvent::ReasoningSignature(signature.to_string()));
                 }
@@ -266,7 +323,7 @@ impl<S> AnthropicSseStream<S> {
                     .and_then(|delta| delta.get("partial_json"))
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                if let Some(block) = self.blocks.get_mut(&index) {
+                if let Some(PartialContentBlock::ToolCall(block)) = self.blocks.get_mut(&index) {
                     block.arguments.push_str(partial);
                 }
             }
@@ -274,12 +331,15 @@ impl<S> AnthropicSseStream<S> {
         }
     }
 
-    /// Completes a tool-use block into a pending tool call.
+    /// Completes a response block while preserving its original position.
     fn stop_block(&mut self, value: &Value) {
         let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
         if let Some(block) = self.blocks.remove(&index) {
-            self.pending
-                .push_back(ChatEvent::ToolCall(block.into_tool_call()));
+            let part = block.into_content_part();
+            self.pending.push_back(ChatEvent::ContentPart(part.clone()));
+            if let ContentPart::ToolCall(call) = part {
+                self.pending.push_back(ChatEvent::ToolCall(call));
+            }
         }
     }
 }
@@ -307,8 +367,15 @@ where
                 return Poll::Ready(None);
             }
 
-            if let Some(position) = this.buffer.find('\n') {
-                let line: String = this.buffer.drain(..=position).collect();
+            if let Some(position) = this.buffer.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = this.buffer.drain(..=position).collect();
+                let line = match std::str::from_utf8(&line) {
+                    Ok(line) => line,
+                    Err(error) => {
+                        this.done = true;
+                        return Poll::Ready(Some(Err(Error::Stream(error.to_string()))));
+                    }
+                };
                 if let Some(error) = this.handle_line(line.trim()) {
                     this.done = true;
                     return Poll::Ready(Some(Err(error)));
@@ -317,14 +384,16 @@ where
             }
 
             match futures_util::ready!(this.inner.poll_next_unpin(cx)) {
-                Some(Ok(bytes)) => this.buffer.push_str(&String::from_utf8_lossy(&bytes)),
+                Some(Ok(bytes)) => this.buffer.extend_from_slice(&bytes),
                 Some(Err(error)) => {
                     this.done = true;
                     return Poll::Ready(Some(Err(Error::Request(error))));
                 }
                 None => {
                     this.done = true;
-                    continue;
+                    return Poll::Ready(Some(Err(Error::Stream(
+                        "anthropic stream ended before message_stop".to_string(),
+                    ))));
                 }
             }
         }
@@ -335,25 +404,98 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn signature_delta_is_exposed_as_a_stream_event() {
-        let inner = futures_util::stream::empty::<Result<Bytes, reqwest::Error>>();
+    #[tokio::test]
+    async fn multibyte_character_split_across_chunks_is_not_mangled() {
+        let inner = futures_util::stream::iter([
+            Ok::<_, reqwest::Error>(Bytes::from_static(
+                b"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\xe4\xbd",
+            )),
+            Ok(Bytes::from_static(
+                b"\xa0\"}}\ndata: {\"type\":\"content_block_stop\",\"index\":0}\ndata: {\"type\":\"message_stop\"}\n",
+            )),
+        ]);
         let mut stream = AnthropicSseStream {
             inner,
-            buffer: String::new(),
+            buffer: Vec::new(),
             done: false,
             pending: VecDeque::new(),
             blocks: BTreeMap::new(),
         };
 
-        let error = stream.handle_line(
-            r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}"#,
+        let mut text = String::new();
+        while let Some(event) = stream.next().await {
+            if let ChatEvent::Text(delta) = event.unwrap() {
+                text.push_str(&delta);
+            }
+        }
+
+        assert_eq!(text, "你");
+        assert!(!text.contains('\u{FFFD}'));
+    }
+
+    #[tokio::test]
+    async fn premature_eof_is_reported_as_an_error() {
+        let inner = futures_util::stream::empty::<Result<Bytes, reqwest::Error>>();
+        let mut stream = AnthropicSseStream {
+            inner,
+            buffer: Vec::new(),
+            done: false,
+            pending: VecDeque::new(),
+            blocks: BTreeMap::new(),
+        };
+
+        assert!(matches!(stream.next().await, Some(Err(Error::Stream(_)))));
+    }
+
+    #[test]
+    fn omitted_thinking_stream_preserves_its_complete_block() {
+        let inner = futures_util::stream::empty::<Result<Bytes, reqwest::Error>>();
+        let mut stream = AnthropicSseStream {
+            inner,
+            buffer: Vec::new(),
+            done: false,
+            pending: VecDeque::new(),
+            blocks: BTreeMap::new(),
+        };
+
+        assert!(
+            stream
+                .handle_line(
+                    r#"data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}"#,
+                )
+                .is_none()
+        );
+        assert!(
+            stream
+                .handle_line(
+                    r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}}"#,
+                )
+                .is_none()
+        );
+        assert!(
+            stream
+                .handle_line(
+                    r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}"#,
+                )
+                .is_none()
+        );
+        assert!(
+            stream
+                .handle_line(r#"data: {"type":"content_block_stop","index":0}"#)
+                .is_none()
         );
 
-        assert!(error.is_none());
         assert_eq!(
             stream.pending.pop_front(),
             Some(ChatEvent::ReasoningSignature("sig_123".to_string()))
+        );
+        assert_eq!(
+            stream.pending.pop_front(),
+            Some(ChatEvent::ContentPart(ContentPart::Reasoning {
+                text: String::new(),
+                signature: Some("sig_123".to_string()),
+            }))
         );
     }
 }

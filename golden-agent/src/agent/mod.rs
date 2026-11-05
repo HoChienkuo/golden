@@ -17,7 +17,9 @@ use futures_util::stream::FuturesUnordered;
 use crate::checkpointer::CheckpointMessage;
 use crate::checkpointer::Checkpointer;
 use crate::error::Error;
-use crate::llm::chat::{ChatEvent, ChatModel, ChatRequest, Content, Message, Role, ToolCall};
+use crate::llm::chat::{
+    ChatEvent, ChatModel, ChatRequest, Content, ContentPart, Message, Role, ToolCall,
+};
 use crate::store::Store;
 use crate::store::{RecallTool, RememberTool};
 
@@ -259,6 +261,7 @@ impl Agent {
                 let mut text = String::new();
                 let mut reasoning = String::new();
                 let mut reasoning_signature = None;
+                let mut completed_parts: Vec<ContentPart> = Vec::new();
                 let mut tool_calls: Vec<ToolCall> = Vec::new();
 
                 let mut stream = model.chat_stream(&step_request);
@@ -275,6 +278,7 @@ impl Agent {
                             text.push_str(&delta);
                             yield Ok(AgentEvent::Text(delta));
                         }
+                        Ok(ChatEvent::ContentPart(part)) => completed_parts.push(part),
                         Ok(ChatEvent::ToolCall(call)) => tool_calls.push(call),
                         Err(error) => {
                             yield Err(error);
@@ -283,11 +287,18 @@ impl Agent {
                     }
                 }
 
-                let mut message = Message::assistant(text).tool_calls(tool_calls.clone());
-                if !reasoning.is_empty() {
-                    message.reasoning = Some(reasoning);
-                }
-                message.reasoning_signature = reasoning_signature;
+                let message = if completed_parts.is_empty() {
+                    let mut message = Message::assistant(text).tool_calls(tool_calls.clone());
+                    if !reasoning.is_empty() {
+                        message.reasoning = Some(reasoning);
+                    }
+                    message.reasoning_signature = reasoning_signature;
+                    message
+                } else {
+                    let message = Message::parts(Role::Assistant, completed_parts);
+                    tool_calls = message.tool_calls.clone();
+                    message
+                };
                 state.messages.push(message);
 
                 for middleware in &middlewares {
@@ -351,7 +362,11 @@ impl Agent {
                     if ok && direct.is_none() && returns_direct(&tools, &call.name) {
                         direct = Some(content.clone());
                     }
-                    state.messages.push(Message::tool(call.id.clone(), content));
+                    state.messages.push(if ok {
+                        Message::tool(call.id.clone(), content)
+                    } else {
+                        Message::tool_error(call.id.clone(), content)
+                    });
                 }
 
                 if let Err(error) = persist_step_stream(
@@ -449,9 +464,10 @@ impl Agent {
                     }
                     Err(error) if self.config.abort_on_tool_error => return Err(error),
                     Err(error) => {
-                        state
-                            .messages
-                            .push(Message::tool(call.id.clone(), format!("Error: {error}")));
+                        state.messages.push(Message::tool_error(
+                            call.id.clone(),
+                            format!("Error: {error}"),
+                        ));
                     }
                 }
             }

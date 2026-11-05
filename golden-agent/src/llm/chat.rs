@@ -14,6 +14,7 @@ use crate::tool::ToolSpec;
 /// Providers stream tool calls in fragments; each provider accumulates them and
 /// emits a complete [`ChatEvent::ToolCall`] once the call is finished.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ChatEvent {
     /// A chunk of the model's reasoning (thinking) output.
     ///
@@ -27,6 +28,11 @@ pub enum ChatEvent {
     ReasoningSignature(String),
     /// A chunk of assistant text.
     Text(String),
+    /// A complete ordered content block assembled from provider deltas.
+    ///
+    /// Incremental text and reasoning events may precede this event. Agent
+    /// implementations use complete blocks to preserve provider round trips.
+    ContentPart(ContentPart),
     /// A tool call the model finished streaming.
     ToolCall(ToolCall),
 }
@@ -63,8 +69,9 @@ pub enum Role {
 
 /// The content of a message.
 ///
-/// Content is either a plain string ([`Content::Text`]) or a list of typed parts
-/// ([`Content::Parts`]) used for multimodal inputs.
+/// Content is either a plain string ([`Content::Text`]) or an ordered list of
+/// typed parts ([`Content::Parts`]). Parts represent multimodal input as well as
+/// assistant reasoning and tool-use blocks that must retain their wire order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Content {
@@ -81,7 +88,11 @@ impl Content {
             Content::Text(text) => Some(text),
             Content::Parts(parts) => parts.iter().find_map(|part| match part {
                 ContentPart::Text { text } => Some(text.as_str()),
-                ContentPart::ImageUrl { .. } => None,
+                ContentPart::ToolResult { content, .. } => Some(content.as_str()),
+                ContentPart::ImageUrl { .. }
+                | ContentPart::Reasoning { .. }
+                | ContentPart::OpaqueReasoning { .. }
+                | ContentPart::ToolCall(_) => None,
             }),
         }
     }
@@ -89,6 +100,14 @@ impl Content {
     /// Returns the first text of this content, or an empty string.
     pub fn text(&self) -> &str {
         self.as_text().unwrap_or_default()
+    }
+
+    /// Returns the ordered parts, if this content uses the block representation.
+    pub fn parts(&self) -> Option<&[ContentPart]> {
+        match self {
+            Content::Text(_) => None,
+            Content::Parts(parts) => Some(parts),
+        }
     }
 }
 
@@ -104,8 +123,12 @@ impl From<&str> for Content {
     }
 }
 
-/// A single typed part of a multimodal message.
+/// A single typed block in an ordered message body.
+///
+/// Providers translate the variants they support and preserve their order.
+/// Opaque reasoning data must be returned unchanged and must not be inspected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "lowercase")]
 pub enum ContentPart {
     /// A text part.
@@ -117,6 +140,34 @@ pub enum ContentPart {
     ImageUrl {
         /// The image URL (or a base64 `data:` URI).
         url: String,
+    },
+    /// Model reasoning that may need to be replayed in a later request.
+    Reasoning {
+        /// Provider-visible reasoning text, which may be empty when omitted.
+        text: String,
+        /// An opaque integrity signature supplied by the provider.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+    },
+    /// Encrypted or safety-redacted reasoning that must be replayed unchanged.
+    #[serde(rename = "opaque_reasoning")]
+    OpaqueReasoning {
+        /// Opaque provider data.
+        data: String,
+    },
+    /// A tool invocation requested by the assistant.
+    #[serde(rename = "tool_call")]
+    ToolCall(ToolCall),
+    /// The result of a tool invocation.
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        /// The id of the tool invocation this result answers.
+        tool_call_id: String,
+        /// The result content.
+        content: String,
+        /// Whether the tool execution failed.
+        #[serde(default, skip_serializing_if = "is_false")]
+        is_error: bool,
     },
 }
 
@@ -227,6 +278,17 @@ impl Message {
         }
     }
 
+    /// Constructs a message from an ordered list of content blocks.
+    ///
+    /// Legacy reasoning and tool fields are populated as compatibility views;
+    /// providers that support ordered blocks use [`Self::content`] as the
+    /// authoritative representation.
+    pub fn parts(role: Role, parts: impl IntoIterator<Item = ContentPart>) -> Self {
+        let mut message = Self::new(role, Content::Parts(parts.into_iter().collect()));
+        message.sync_legacy_fields();
+        message
+    }
+
     /// Constructs a system message.
     pub fn system(content: impl Into<String>) -> Self {
         Self::new(Role::System, content.into())
@@ -242,11 +304,23 @@ impl Message {
         Self::new(Role::Assistant, content.into())
     }
 
-    /// Constructs a tool message carrying the result of a tool call.
+    /// Constructs a successful tool-result message.
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         let mut message = Self::new(Role::Tool, content.into());
         message.tool_call_id = Some(tool_call_id.into());
         message
+    }
+
+    /// Constructs a failed tool-result message.
+    pub fn tool_error(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self::parts(
+            Role::Tool,
+            [ContentPart::ToolResult {
+                tool_call_id: tool_call_id.into(),
+                content: content.into(),
+                is_error: true,
+            }],
+        )
     }
 
     /// Sets the participant name.
@@ -257,30 +331,112 @@ impl Message {
 
     /// Sets the tool calls produced by the model.
     pub fn tool_calls(mut self, tool_calls: impl IntoIterator<Item = ToolCall>) -> Self {
-        self.tool_calls = tool_calls.into_iter().collect();
+        let tool_calls: Vec<_> = tool_calls.into_iter().collect();
+        if let Content::Parts(parts) = &mut self.content {
+            let mut replacements = tool_calls.iter().cloned();
+            let mut last_position = None;
+            let mut index = 0;
+            while index < parts.len() {
+                if matches!(parts[index], ContentPart::ToolCall(_)) {
+                    if let Some(call) = replacements.next() {
+                        parts[index] = ContentPart::ToolCall(call);
+                        last_position = Some(index);
+                        index += 1;
+                    } else {
+                        parts.remove(index);
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+            let insert_at = last_position.map_or(parts.len(), |position| position + 1);
+            parts.splice(
+                insert_at..insert_at,
+                replacements.map(ContentPart::ToolCall),
+            );
+            self.sync_legacy_fields();
+        } else {
+            self.tool_calls = tool_calls;
+        }
         self
     }
 
     /// Sets the id of the tool call this message responds to.
     pub fn tool_call_id(mut self, tool_call_id: impl Into<String>) -> Self {
-        self.tool_call_id = Some(tool_call_id.into());
+        let tool_call_id = tool_call_id.into();
+        if let Content::Parts(parts) = &mut self.content
+            && let Some(ContentPart::ToolResult {
+                tool_call_id: block_id,
+                ..
+            }) = parts
+                .iter_mut()
+                .find(|part| matches!(part, ContentPart::ToolResult { .. }))
+        {
+            *block_id = tool_call_id.clone();
+        }
+        self.tool_call_id = Some(tool_call_id);
         self
     }
 
     /// Sets the reasoning (thinking) content of an assistant message.
     pub fn reasoning(mut self, reasoning: impl Into<String>) -> Self {
-        self.reasoning = Some(reasoning.into());
+        let reasoning = reasoning.into();
+        if let Content::Parts(parts) = &mut self.content {
+            if let Some(ContentPart::Reasoning { text, signature }) = parts
+                .iter_mut()
+                .find(|part| matches!(part, ContentPart::Reasoning { .. }))
+            {
+                *text = reasoning;
+                *signature = None;
+            } else {
+                parts.insert(
+                    0,
+                    ContentPart::Reasoning {
+                        text: reasoning,
+                        signature: None,
+                    },
+                );
+            }
+            self.sync_legacy_fields();
+        } else {
+            self.reasoning = Some(reasoning);
+        }
         self
     }
 
-    /// Returns the reasoning content of this message, if any.
+    /// Returns the first reasoning block, or the legacy reasoning field.
     pub fn reasoning_text(&self) -> Option<&str> {
-        self.reasoning.as_deref()
+        self.content
+            .parts()
+            .and_then(|parts| {
+                parts.iter().find_map(|part| match part {
+                    ContentPart::Reasoning { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+            })
+            .or(self.reasoning.as_deref())
     }
 
-    /// Sets the provider's opaque signature for the reasoning content.
+    /// Sets the provider's opaque signature for the last reasoning block.
     pub fn reasoning_signature(mut self, signature: impl Into<String>) -> Self {
-        self.reasoning_signature = Some(signature.into());
+        let signature = signature.into();
+        if let Content::Parts(parts) = &mut self.content {
+            if let Some(ContentPart::Reasoning {
+                signature: block_signature,
+                ..
+            }) = parts
+                .iter_mut()
+                .rev()
+                .find(|part| matches!(part, ContentPart::Reasoning { .. }))
+            {
+                *block_signature = Some(signature);
+                self.sync_legacy_fields();
+            } else {
+                self.reasoning_signature = Some(signature);
+            }
+        } else {
+            self.reasoning_signature = Some(signature);
+        }
         self
     }
 
@@ -299,6 +455,42 @@ impl Message {
     /// Returns the first text of this message, or an empty string.
     pub fn text(&self) -> &str {
         self.content.text()
+    }
+
+    /// Rebuilds the legacy flattened fields from ordered content blocks.
+    fn sync_legacy_fields(&mut self) {
+        let Content::Parts(parts) = &self.content else {
+            return;
+        };
+
+        let mut reasoning_blocks = Vec::new();
+        let mut tool_calls = Vec::new();
+        let mut tool_call_id = None;
+
+        for part in parts {
+            match part {
+                ContentPart::Reasoning { text, signature } => {
+                    reasoning_blocks.push((text.clone(), signature.clone()));
+                }
+                ContentPart::ToolCall(call) => tool_calls.push(call.clone()),
+                ContentPart::ToolResult {
+                    tool_call_id: id, ..
+                } => tool_call_id = Some(id.clone()),
+                ContentPart::Text { .. }
+                | ContentPart::ImageUrl { .. }
+                | ContentPart::OpaqueReasoning { .. } => {}
+            }
+        }
+
+        if let [(reasoning, signature)] = reasoning_blocks.as_slice() {
+            self.reasoning = Some(reasoning.clone());
+            self.reasoning_signature = signature.clone();
+        } else {
+            self.reasoning = None;
+            self.reasoning_signature = None;
+        }
+        self.tool_calls = tool_calls;
+        self.tool_call_id = tool_call_id;
     }
 }
 
@@ -611,7 +803,7 @@ impl ChatResponse {
     ///
     /// Empty when reasoning was not enabled or the provider did not return it.
     pub fn reasoning(&self) -> &str {
-        self.message.reasoning.as_deref().unwrap_or("")
+        self.message.reasoning_text().unwrap_or("")
     }
 
     /// Deserializes the assistant text into `T`.
@@ -692,4 +884,8 @@ pub struct Usage {
 
 fn default_true() -> bool {
     true
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }

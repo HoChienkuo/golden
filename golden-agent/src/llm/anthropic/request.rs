@@ -68,8 +68,6 @@ pub enum Thinking {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct OutputConfig {
     /// How hard the model should think before answering.
-    ///
-    /// Only `effort` is supported; DeepSeek reads `low` / `high` / `max`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
 }
@@ -138,12 +136,21 @@ pub enum ContentBlock {
         /// The opaque signature that must be returned unchanged.
         signature: String,
     },
+    /// Safety-redacted reasoning, echoed back unchanged.
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking {
+        /// Opaque encrypted reasoning data.
+        data: String,
+    },
     /// The result of a tool invocation, sent on a user turn.
     ToolResult {
         /// The id of the `tool_use` block this result answers.
         tool_use_id: String,
         /// The tool result, as a string.
         content: String,
+        /// Whether the tool execution failed.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_error: Option<bool>,
     },
 }
 

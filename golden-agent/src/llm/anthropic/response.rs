@@ -16,9 +16,6 @@ pub struct MessagesResponse {
     /// Why generation stopped.
     #[serde(default)]
     pub stop_reason: Option<String>,
-    /// The actual inference speed used by the provider.
-    #[serde(default)]
-    pub speed: Option<String>,
     /// Billing and rate-limit usage.
     #[serde(default)]
     pub usage: Usage,
@@ -44,6 +41,11 @@ pub enum OutputBlock {
         /// The opaque signature that must be handed back on the next turn.
         #[serde(default)]
         signature: String,
+    },
+    /// Safety-redacted reasoning that must be handed back unchanged.
+    RedactedThinking {
+        /// Opaque encrypted reasoning data.
+        data: String,
     },
     /// A tool invocation requested by the model.
     ToolUse {
@@ -71,6 +73,9 @@ pub struct Usage {
     /// Detailed output-token accounting, when returned by the API.
     #[serde(default)]
     pub output_tokens_details: Option<OutputTokensDetails>,
+    /// The actual inference speed used by the provider.
+    #[serde(default)]
+    pub speed: Option<String>,
 }
 
 /// Detailed accounting for generated output tokens.

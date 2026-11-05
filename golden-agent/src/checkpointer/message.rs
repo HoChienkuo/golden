@@ -135,3 +135,36 @@ impl From<CheckpointMessage> for Message {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ContentPart;
+
+    #[test]
+    fn ordered_content_survives_checkpoint_conversion() {
+        let message = Message::parts(
+            Role::Assistant,
+            [
+                ContentPart::Reasoning {
+                    text: String::new(),
+                    signature: Some("sig-1".to_string()),
+                },
+                ContentPart::OpaqueReasoning {
+                    data: "encrypted".to_string(),
+                },
+                ContentPart::ToolCall(ToolCall {
+                    id: "tool-1".to_string(),
+                    name: "lookup".to_string(),
+                    arguments: "{}".to_string(),
+                }),
+            ],
+        );
+        let expected = message.content.clone();
+        let stored = CheckpointMessage::from_message(&message, "thread-1", "run-1");
+        let restored: Message = stored.into();
+
+        assert_eq!(restored.content, expected);
+        assert_eq!(restored.tool_calls.len(), 1);
+    }
+}

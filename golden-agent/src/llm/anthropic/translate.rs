@@ -87,36 +87,32 @@ fn to_effort(effort: ReasoningEffort) -> Effort {
 
 /// Translates a Messages API response into a neutral [`ChatResponse`].
 pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
-    let inference_speed = response.speed.map(InferenceSpeed::from_provider);
-    let mut text = String::new();
-    let mut reasoning = String::new();
-    let mut signature = None;
-    let mut has_signed_thinking = false;
-    let mut tool_calls: Vec<ToolCall> = Vec::new();
-
-    for block in response.content {
-        match block {
-            OutputBlock::Text { text: value } => text.push_str(&value),
+    let inference_speed = response
+        .usage
+        .speed
+        .clone()
+        .map(InferenceSpeed::from_provider);
+    let parts: Vec<ContentPart> = response
+        .content
+        .into_iter()
+        .filter_map(|block| match block {
+            OutputBlock::Text { text } => Some(ContentPart::Text { text }),
             OutputBlock::Thinking {
                 thinking,
-                signature: block_signature,
-            } => {
-                // A signature marks a complete, replayable thinking block; a
-                // streamed response that was cut short has none.
-                if !block_signature.is_empty() {
-                    reasoning.push_str(&thinking);
-                    signature = Some(block_signature);
-                    has_signed_thinking = true;
-                }
-            }
-            OutputBlock::ToolUse { id, name, input } => tool_calls.push(ToolCall {
+                signature,
+            } => Some(ContentPart::Reasoning {
+                text: thinking,
+                signature: (!signature.is_empty()).then_some(signature),
+            }),
+            OutputBlock::RedactedThinking { data } => Some(ContentPart::OpaqueReasoning { data }),
+            OutputBlock::ToolUse { id, name, input } => Some(ContentPart::ToolCall(ToolCall {
                 id,
                 name,
                 arguments: input.to_string(),
-            }),
-            OutputBlock::Other => {}
-        }
-    }
+            })),
+            OutputBlock::Other => None,
+        })
+        .collect();
 
     let reasoning_tokens = response
         .usage
@@ -127,19 +123,7 @@ pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
     ChatResponse {
         id: response.id,
         model: response.model,
-        message: Message {
-            role: Role::Assistant,
-            content: Content::Text(text),
-            name: None,
-            tool_calls,
-            tool_call_id: None,
-            reasoning: has_signed_thinking.then_some(reasoning),
-            reasoning_signature: signature,
-            id: None,
-            run_id: None,
-            is_context: true,
-            created_at: None,
-        },
+        message: Message::parts(Role::Assistant, parts),
         finish_reason: response.stop_reason.as_deref().map(parse_finish_reason),
         usage: Some(Usage {
             prompt_tokens: response.usage.input_tokens,
@@ -178,10 +162,7 @@ fn translate_messages(request: &ChatRequest) -> (Option<String>, Vec<InputMessag
             }
             Role::Tool => messages.push(InputMessage {
                 role: AnthropicRole::User,
-                content: vec![ContentBlock::ToolResult {
-                    tool_use_id: message.tool_call_id.clone().unwrap_or_default(),
-                    content: message.content.text().to_string(),
-                }],
+                content: tool_result_content(message),
             }),
         }
     }
@@ -196,11 +177,23 @@ fn user_content(content: &Content) -> Vec<ContentBlock> {
         Content::Text(text) => vec![ContentBlock::Text { text: text.clone() }],
         Content::Parts(parts) => parts
             .iter()
-            .map(|part| match part {
-                ContentPart::Text { text } => ContentBlock::Text { text: text.clone() },
-                ContentPart::ImageUrl { url } => ContentBlock::Image {
+            .filter_map(|part| match part {
+                ContentPart::Text { text } => Some(ContentBlock::Text { text: text.clone() }),
+                ContentPart::ImageUrl { url } => Some(ContentBlock::Image {
                     source: ImageSource::Url { url: url.clone() },
-                },
+                }),
+                ContentPart::ToolResult {
+                    tool_call_id,
+                    content,
+                    is_error,
+                } => Some(ContentBlock::ToolResult {
+                    tool_use_id: tool_call_id.clone(),
+                    content: content.clone(),
+                    is_error: is_error.then_some(true),
+                }),
+                ContentPart::Reasoning { .. }
+                | ContentPart::OpaqueReasoning { .. }
+                | ContentPart::ToolCall(_) => None,
             })
             .collect(),
     }
@@ -210,34 +203,83 @@ fn user_content(content: &Content) -> Vec<ContentBlock> {
 /// first (Anthropic requires thinking to lead the turn it produced), then the
 /// text and any tool calls.
 ///
-/// Thinking is only replayed when its signature is known; unsigned reasoning
-/// (from streaming, which does not surface the signature) is dropped.
+/// Ordered content parts are replayed exactly. Legacy flattened fields are used
+/// only for messages created before ordered block support.
 fn assistant_content(message: &Message) -> Vec<ContentBlock> {
-    let mut blocks = Vec::new();
+    if let Content::Parts(parts) = &message.content {
+        let blocks: Vec<_> = parts
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::Text { text } => Some(ContentBlock::Text { text: text.clone() }),
+                ContentPart::Reasoning { text, signature } => {
+                    signature.as_ref().map(|signature| ContentBlock::Thinking {
+                        thinking: text.clone(),
+                        signature: signature.clone(),
+                    })
+                }
+                ContentPart::OpaqueReasoning { data } => {
+                    Some(ContentBlock::RedactedThinking { data: data.clone() })
+                }
+                ContentPart::ToolCall(call) => Some(tool_use_block(call)),
+                ContentPart::ImageUrl { .. } | ContentPart::ToolResult { .. } => None,
+            })
+            .collect();
+        if !blocks.is_empty() {
+            return blocks;
+        }
+    }
 
+    let mut blocks = Vec::new();
     if let (Some(thinking), Some(signature)) = (&message.reasoning, &message.reasoning_signature) {
         blocks.push(ContentBlock::Thinking {
             thinking: thinking.clone(),
             signature: signature.clone(),
         });
     }
-
-    let text = message.content.text();
-    if !text.is_empty() {
+    if !message.content.text().is_empty() {
         blocks.push(ContentBlock::Text {
-            text: text.to_string(),
+            text: message.content.text().to_string(),
         });
     }
-
-    for call in &message.tool_calls {
-        blocks.push(ContentBlock::ToolUse {
-            id: call.id.clone(),
-            name: call.name.clone(),
-            input: serde_json::from_str(&call.arguments).unwrap_or(Value::Null),
-        });
-    }
-
+    blocks.extend(message.tool_calls.iter().map(tool_use_block));
     blocks
+}
+
+fn tool_use_block(call: &ToolCall) -> ContentBlock {
+    ContentBlock::ToolUse {
+        id: call.id.clone(),
+        name: call.name.clone(),
+        input: serde_json::from_str(&call.arguments).unwrap_or(Value::Null),
+    }
+}
+
+fn tool_result_content(message: &Message) -> Vec<ContentBlock> {
+    if let Content::Parts(parts) = &message.content {
+        let blocks: Vec<_> = parts
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::ToolResult {
+                    tool_call_id,
+                    content,
+                    is_error,
+                } => Some(ContentBlock::ToolResult {
+                    tool_use_id: tool_call_id.clone(),
+                    content: content.clone(),
+                    is_error: is_error.then_some(true),
+                }),
+                _ => None,
+            })
+            .collect();
+        if !blocks.is_empty() {
+            return blocks;
+        }
+    }
+
+    vec![ContentBlock::ToolResult {
+        tool_use_id: message.tool_call_id.clone().unwrap_or_default(),
+        content: message.content.text().to_string(),
+        is_error: None,
+    }]
 }
 
 /// Translates a neutral tool choice into Anthropic's.
@@ -298,11 +340,11 @@ mod tests {
             "id": "message-1",
             "model": "claude",
             "content": [],
-            "speed": "fast",
             "usage": {
                 "input_tokens": 1,
                 "output_tokens": 2,
-                "output_tokens_details": {"thinking_tokens": 1}
+                "output_tokens_details": {"thinking_tokens": 1},
+                "speed": "fast"
             }
         }))
         .unwrap();
@@ -375,5 +417,49 @@ mod tests {
             .reasoning(Reasoning::Budget(2_000));
         let error = build_request(&request, false, 4096).unwrap_err();
         assert!(matches!(error, Error::InvalidRequest { .. }));
+    }
+
+    #[test]
+    fn response_blocks_round_trip_in_original_order() {
+        let wire: MessagesResponse = serde_json::from_value(serde_json::json!({
+            "id": "message-1",
+            "model": "claude",
+            "content": [
+                {"type": "thinking", "thinking": "first", "signature": "sig-1"},
+                {"type": "tool_use", "id": "tool-1", "name": "lookup", "input": {"q": 1}},
+                {"type": "redacted_thinking", "data": "encrypted"},
+                {"type": "thinking", "thinking": "second", "signature": "sig-2"},
+                {"type": "text", "text": "done"}
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 2}
+        }))
+        .unwrap();
+
+        let response = into_chat_response(wire);
+        let request = ChatRequest::new("claude")
+            .add_message(Message::user("start"))
+            .add_message(response.message);
+        let body = request_body(&request);
+
+        assert_eq!(body["messages"][1]["content"][0]["type"], "thinking");
+        assert_eq!(body["messages"][1]["content"][0]["signature"], "sig-1");
+        assert_eq!(body["messages"][1]["content"][1]["type"], "tool_use");
+        assert_eq!(
+            body["messages"][1]["content"][2]["type"],
+            "redacted_thinking"
+        );
+        assert_eq!(body["messages"][1]["content"][3]["signature"], "sig-2");
+        assert_eq!(body["messages"][1]["content"][4]["text"], "done");
+    }
+
+    #[test]
+    fn failed_tool_result_sets_is_error() {
+        let request = ChatRequest::new("claude")
+            .add_message(Message::user("start"))
+            .add_message(Message::tool_error("tool-1", "failed"));
+        let body = request_body(&request);
+
+        assert_eq!(body["messages"][1]["content"][0]["type"], "tool_result");
+        assert_eq!(body["messages"][1]["content"][0]["is_error"], true);
     }
 }
