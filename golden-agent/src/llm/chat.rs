@@ -20,6 +20,11 @@ pub enum ChatEvent {
     /// Only emitted when the request asked for reasoning and the provider
     /// streams it; it always arrives before the corresponding [`Self::Text`].
     Reasoning(String),
+    /// An opaque signature for the streamed reasoning block.
+    ///
+    /// Providers such as Anthropic require this value to be returned unchanged
+    /// when the reasoning block is included in a later request.
+    ReasoningSignature(String),
     /// A chunk of assistant text.
     Text(String),
     /// A tool call the model finished streaming.
@@ -334,10 +339,11 @@ pub enum ResponseFormat {
 /// How much reasoning (thinking) the model should produce before answering.
 ///
 /// Reasoning-capable models think before they answer. Providers expose the
-/// switch differently — DeepSeek takes a `thinking: {type}` object plus a
-/// `reasoning_effort` level, Anthropic takes a token budget — and each provider
-/// maps the variants it supports, in the order `Budget` → `Effort` →
-/// `Enabled`/`Disabled`. Providers without a reasoning switch ignore the setting.
+/// switch differently. DeepSeek takes a `thinking: {type}` object plus a
+/// `reasoning_effort` level. Anthropic maps [`Reasoning::Enabled`] and
+/// [`Reasoning::Effort`] to adaptive thinking, while [`Reasoning::Budget`] uses
+/// legacy manual extended thinking on models that still support it. Providers
+/// without a reasoning switch ignore the setting.
 ///
 /// Leaving [`ChatRequest::reasoning`] unset sends nothing at all, so the
 /// provider default applies (DeepSeek thinks by default).
@@ -347,12 +353,17 @@ pub enum Reasoning {
     #[default]
     Disabled,
     /// Think with the provider's default intensity.
+    ///
+    /// Anthropic maps this to adaptive thinking without overriding the model's
+    /// default effort.
     Enabled,
     /// Think with a fixed effort level.
     Effort(ReasoningEffort),
     /// Think within a token budget of at most this many tokens.
     ///
-    /// Providers without a budget concept fall back to [`Reasoning::Effort`].
+    /// Anthropic uses legacy manual extended thinking for this variant, which
+    /// is unavailable on Claude 4.7 and later models. Providers without a
+    /// budget concept fall back to [`Reasoning::Effort`].
     Budget(u32),
 }
 

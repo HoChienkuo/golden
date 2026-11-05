@@ -23,12 +23,7 @@ pub struct MessagesRequest {
     /// How the model should use the provided tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
-    /// Sampling temperature (0.0 to 1.0).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    /// Nucleus sampling.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
+
     /// Custom text sequences that stop generation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_sequences: Option<Vec<String>>,
@@ -38,12 +33,7 @@ pub struct MessagesRequest {
     /// The inference speed to use.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
-    /// Extended thinking switch. When enabled, the model thinks before it
-    /// answers and returns `thinking` content blocks.
-    ///
-    /// DeepSeek accepts `enabled` / `disabled` here and ignores the
-    /// `budget_tokens` that Anthropic uses; the thinking intensity comes from
-    /// [`Self::output_config`] instead.
+    /// Thinking configuration for the request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<Thinking>,
     /// Output tuning, including the thinking effort level.
@@ -63,10 +53,9 @@ pub enum Speed {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Thinking {
-    /// Extended thinking, with a budget of `budget_tokens` tokens.
-    ///
-    /// Anthropic uses the budget to size its thinking; providers that expose a
-    /// discrete effort scale (DeepSeek) ignore it.
+    /// Adaptive thinking, where the model decides whether and how much to think.
+    Adaptive,
+    /// Legacy manual extended thinking with a fixed token budget.
     Enabled {
         /// The maximum number of tokens Claude may spend thinking.
         budget_tokens: u32,
@@ -86,15 +75,14 @@ pub struct OutputConfig {
 }
 
 /// The thinking effort levels `output_config.effort` accepts.
-///
-/// DeepSeek documents `low` / `high` / `max`; the neutral `medium` level is
-/// folded into `high` before it reaches the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
     /// Low thinking effort.
     Low,
-    /// High thinking effort (the provider default).
+    /// Medium thinking effort.
+    Medium,
+    /// High thinking effort.
     High,
     /// Maximum thinking effort.
     Max,

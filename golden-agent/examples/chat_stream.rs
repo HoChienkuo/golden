@@ -14,6 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(event) = stream.next().await {
         match event? {
             ChatEvent::Reasoning(thinking) => print!("\x1b[2m{thinking}\x1b[0m"),
+            ChatEvent::ReasoningSignature(_) => {}
             ChatEvent::Text(text) => print!("{text}"),
             ChatEvent::ToolCall(call) => println!("\n[tool] {}({})", call.name, call.arguments),
         }

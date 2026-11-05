@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::error::Error;
 use crate::llm::chat::{
     ChatRequest, ChatResponse, Content, ContentPart, FinishReason, InferenceSpeed, Message,
     Reasoning, ReasoningEffort, Role, ToolCall, ToolChoice, Usage,
@@ -15,9 +16,6 @@ use super::tool::{Tool, ToolChoice as AnthropicToolChoice};
 
 /// Anthropic's minimum extended-thinking budget.
 const MIN_THINKING_BUDGET: u32 = 1024;
-/// The extended-thinking budget used for [`Reasoning::Enabled`], and for effort
-/// levels when the provider only understands a budget.
-const DEFAULT_THINKING_BUDGET: u32 = 4096;
 
 /// Translates a neutral [`ChatRequest`] into a Messages API request.
 ///
@@ -27,50 +25,62 @@ pub(crate) fn build_request(
     request: &ChatRequest,
     stream: bool,
     default_max_tokens: u32,
-) -> MessagesRequest {
+) -> Result<MessagesRequest, Error> {
+    if request.temperature.is_some() || request.top_p.is_some() {
+        return Err(Error::InvalidRequest {
+            message: "Anthropic API version 2026-10-21 does not support `temperature` or `top_p`"
+                .to_string(),
+        });
+    }
+
+    let max_tokens = request.max_tokens.unwrap_or(default_max_tokens);
+    let thinking = match request.reasoning {
+        Some(Reasoning::Disabled) => Some(Thinking::Disabled),
+        Some(Reasoning::Enabled | Reasoning::Effort(_)) => Some(Thinking::Adaptive),
+        Some(Reasoning::Budget(budget_tokens)) => {
+            if budget_tokens < MIN_THINKING_BUDGET || budget_tokens >= max_tokens {
+                return Err(Error::InvalidRequest {
+                    message: format!(
+                        "Anthropic manual thinking budget must be at least {MIN_THINKING_BUDGET} and less than max_tokens ({max_tokens})"
+                    ),
+                });
+            }
+            Some(Thinking::Enabled { budget_tokens })
+        }
+        None => None,
+    };
+
     let (system, messages) = translate_messages(request);
 
     let tools = (!request.tools.is_empty())
         .then(|| request.tools.iter().map(Tool::from_tool_spec).collect());
 
-    MessagesRequest {
+    Ok(MessagesRequest {
         model: request.model.clone(),
-        max_tokens: request.max_tokens.unwrap_or(default_max_tokens),
+        max_tokens,
         messages,
         system,
         tools,
         tool_choice: request.tool_choice.as_ref().map(translate_tool_choice),
-        temperature: request.temperature.map(clamp_temperature),
-        top_p: request.top_p,
         stop_sequences: request.stop.clone(),
         stream: stream.then_some(true),
         speed: (request.inference_speed == Some(InferenceSpeed::Fast)).then_some(Speed::Fast),
-        thinking: request.reasoning.map(|reasoning| match reasoning {
-            Reasoning::Disabled => Thinking::Disabled,
-            Reasoning::Budget(tokens) => Thinking::Enabled {
-                budget_tokens: tokens.clamp(MIN_THINKING_BUDGET, u32::MAX),
-            },
-            Reasoning::Enabled | Reasoning::Effort(_) => Thinking::Enabled {
-                budget_tokens: DEFAULT_THINKING_BUDGET,
-            },
-        }),
-        output_config: request
-            .reasoning
-            .and_then(|reasoning| reasoning.effort())
-            .map(|effort| OutputConfig {
+        thinking,
+        output_config: match request.reasoning {
+            Some(Reasoning::Effort(effort)) => Some(OutputConfig {
                 effort: Some(to_effort(effort)),
             }),
-    }
+            _ => None,
+        },
+    })
 }
 
 /// Maps a neutral effort level onto `output_config.effort`'s scale.
-///
-/// DeepSeek folds `medium` into `high`, so the neutral middle level does not
-/// reach the wire.
 fn to_effort(effort: ReasoningEffort) -> Effort {
     match effort {
         ReasoningEffort::Low => Effort::Low,
-        ReasoningEffort::Medium | ReasoningEffort::High => Effort::High,
+        ReasoningEffort::Medium => Effort::Medium,
+        ReasoningEffort::High => Effort::High,
         ReasoningEffort::Max => Effort::Max,
     }
 }
@@ -108,6 +118,12 @@ pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
         }
     }
 
+    let reasoning_tokens = response
+        .usage
+        .output_tokens_details
+        .as_ref()
+        .map(|details| details.thinking_tokens);
+
     ChatResponse {
         id: response.id,
         model: response.model,
@@ -129,7 +145,7 @@ pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
             prompt_tokens: response.usage.input_tokens,
             completion_tokens: response.usage.output_tokens,
             total_tokens: response.usage.input_tokens + response.usage.output_tokens,
-            reasoning_tokens: None,
+            reasoning_tokens,
         }),
         inference_speed,
     }
@@ -244,11 +260,6 @@ fn parse_finish_reason(reason: &str) -> FinishReason {
     }
 }
 
-/// Anthropic's temperature range is 0.0 to 1.0, narrower than OpenAI's.
-fn clamp_temperature(value: f32) -> f32 {
-    value.clamp(0.0, 1.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,13 +272,14 @@ mod tests {
     }
 
     fn request_body(request: &ChatRequest) -> serde_json::Value {
-        serde_json::to_value(build_request(request, false, 4096)).unwrap()
+        serde_json::to_value(build_request(request, false, 4096).unwrap()).unwrap()
     }
 
     #[test]
     fn fast_mode_maps_to_speed_and_is_independent_of_thinking() {
         let request = ChatRequest::new("claude")
             .add_message(Message::user("hi"))
+            .max_tokens(16_000)
             .inference_speed(InferenceSpeed::Fast)
             .reasoning(Reasoning::Budget(8_000));
         let body = request_body(&request);
@@ -287,12 +299,17 @@ mod tests {
             "model": "claude",
             "content": [],
             "speed": "fast",
-            "usage": {"input_tokens": 1, "output_tokens": 2}
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 2,
+                "output_tokens_details": {"thinking_tokens": 1}
+            }
         }))
         .unwrap();
 
         let response = into_chat_response(wire);
         assert_eq!(response.inference_speed, Some(InferenceSpeed::Fast));
+        assert_eq!(response.usage.unwrap().reasoning_tokens, Some(1));
     }
 
     #[test]
@@ -313,13 +330,13 @@ mod tests {
     fn effort_goes_to_output_config() {
         let cases = [
             (ReasoningEffort::Low, "low"),
-            (ReasoningEffort::Medium, "high"),
+            (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
             (ReasoningEffort::Max, "max"),
         ];
         for (effort, expected) in cases {
             let body = body(Some(Reasoning::Effort(effort)));
-            assert_eq!(body["thinking"]["type"], "enabled");
+            assert_eq!(body["thinking"]["type"], "adaptive");
             assert_eq!(
                 body["output_config"],
                 serde_json::json!({ "effort": expected })
@@ -329,7 +346,34 @@ mod tests {
 
     #[test]
     fn budget_sets_thinking_budget_tokens() {
-        let body = body(Some(Reasoning::Budget(8_000)));
-        assert_eq!(body["thinking"]["budget_tokens"], 8_000);
+        let body = body(Some(Reasoning::Budget(2_000)));
+        assert_eq!(body["thinking"]["budget_tokens"], 2_000);
+        assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn enabled_uses_adaptive_thinking() {
+        let body = body(Some(Reasoning::Enabled));
+        assert_eq!(body["thinking"], serde_json::json!({"type": "adaptive"}));
+        assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn removed_sampling_parameters_are_rejected_locally() {
+        let request = ChatRequest::new("claude")
+            .add_message(Message::user("hi"))
+            .temperature(0.5);
+        let error = build_request(&request, false, 4096).unwrap_err();
+        assert!(matches!(error, Error::InvalidRequest { .. }));
+    }
+
+    #[test]
+    fn manual_thinking_budget_must_be_below_max_tokens() {
+        let request = ChatRequest::new("claude")
+            .add_message(Message::user("hi"))
+            .max_tokens(2_000)
+            .reasoning(Reasoning::Budget(2_000));
+        let error = build_request(&request, false, 4096).unwrap_err();
+        assert!(matches!(error, Error::InvalidRequest { .. }));
     }
 }

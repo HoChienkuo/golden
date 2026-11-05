@@ -18,8 +18,8 @@ use super::translate;
 /// The official Anthropic API base URL.
 pub const BASE_URL: &str = "https://api.anthropic.com";
 
-/// The `anthropic-version` header value sent with every request.
-pub const API_VERSION: &str = "2023-06-01";
+/// The `anthropic-version` header value sent to the Messages API.
+pub const MESSAGES_API_VERSION: &str = "2026-10-21";
 
 /// The `max_tokens` used when a request does not set one. Anthropic requires it.
 const DEFAULT_MAX_TOKENS: u32 = 4096;
@@ -69,7 +69,7 @@ impl AnthropicLlm {
 #[async_trait]
 impl ChatModel for AnthropicLlm {
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
-        let body = translate::build_request(request, false, DEFAULT_MAX_TOKENS);
+        let body = translate::build_request(request, false, DEFAULT_MAX_TOKENS)?;
 
         let response = self
             .config
@@ -77,7 +77,7 @@ impl ChatModel for AnthropicLlm {
                 self.http
                     .post(self.endpoint())
                     .header("x-api-key", &self.api_key)
-                    .header("anthropic-version", API_VERSION)
+                    .header("anthropic-version", MESSAGES_API_VERSION)
                     .json(&body),
             )
             .send()
@@ -101,10 +101,18 @@ impl ChatModel for AnthropicLlm {
         let url = self.endpoint();
 
         Box::pin(async_stream::stream! {
+            let body = match body {
+                Ok(body) => body,
+                Err(error) => {
+                    yield Err(error);
+                    return;
+                }
+            };
+
             let response = match http
                 .post(&url)
                 .header("x-api-key", &api_key)
-                .header("anthropic-version", API_VERSION)
+                .header("anthropic-version", MESSAGES_API_VERSION)
                 .json(&body)
                 .send()
                 .await
@@ -243,6 +251,16 @@ impl<S> AnthropicSseStream<S> {
                         .push_back(ChatEvent::Reasoning(thinking.to_string()));
                 }
             }
+            Some("signature_delta") => {
+                let signature = delta
+                    .and_then(|delta| delta.get("signature"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !signature.is_empty() {
+                    self.pending
+                        .push_back(ChatEvent::ReasoningSignature(signature.to_string()));
+                }
+            }
             Some("input_json_delta") => {
                 let partial = delta
                     .and_then(|delta| delta.get("partial_json"))
@@ -310,5 +328,32 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signature_delta_is_exposed_as_a_stream_event() {
+        let inner = futures_util::stream::empty::<Result<Bytes, reqwest::Error>>();
+        let mut stream = AnthropicSseStream {
+            inner,
+            buffer: String::new(),
+            done: false,
+            pending: VecDeque::new(),
+            blocks: BTreeMap::new(),
+        };
+
+        let error = stream.handle_line(
+            r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}"#,
+        );
+
+        assert!(error.is_none());
+        assert_eq!(
+            stream.pending.pop_front(),
+            Some(ChatEvent::ReasoningSignature("sig_123".to_string()))
+        );
     }
 }

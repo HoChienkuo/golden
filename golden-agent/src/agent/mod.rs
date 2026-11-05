@@ -258,6 +258,7 @@ impl Agent {
 
                 let mut text = String::new();
                 let mut reasoning = String::new();
+                let mut reasoning_signature = None;
                 let mut tool_calls: Vec<ToolCall> = Vec::new();
 
                 let mut stream = model.chat_stream(&step_request);
@@ -266,6 +267,9 @@ impl Agent {
                         Ok(ChatEvent::Reasoning(delta)) => {
                             reasoning.push_str(&delta);
                             yield Ok(AgentEvent::Reasoning(delta));
+                        }
+                        Ok(ChatEvent::ReasoningSignature(signature)) => {
+                            reasoning_signature = Some(signature);
                         }
                         Ok(ChatEvent::Text(delta)) => {
                             text.push_str(&delta);
@@ -283,6 +287,7 @@ impl Agent {
                 if !reasoning.is_empty() {
                     message.reasoning = Some(reasoning);
                 }
+                message.reasoning_signature = reasoning_signature;
                 state.messages.push(message);
 
                 for middleware in &middlewares {

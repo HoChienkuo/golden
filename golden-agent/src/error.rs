@@ -20,6 +20,13 @@ pub enum Error {
         message: String,
     },
 
+    /// The request cannot be represented by the selected provider API.
+    #[error("invalid request: {message}")]
+    InvalidRequest {
+        /// A description of the unsupported or inconsistent request.
+        message: String,
+    },
+
     /// A streaming response parsing error.
     #[error("invalid sse data: {0}")]
     Stream(String),
@@ -88,9 +95,11 @@ pub struct ApiErrorBody {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApiErrorDetail {
     pub message: String,
-    #[serde(rename = "type")]
+    #[serde(default, rename = "type")]
     pub error_type: String,
+    #[serde(default)]
     pub param: Option<String>,
+    #[serde(default)]
     pub code: Option<String>,
 }
 
@@ -106,5 +115,26 @@ impl Error {
             body,
             message,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anthropic_error_body_preserves_provider_message() {
+        let body: ApiErrorBody = serde_json::from_value(serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "temperature is not supported"
+            },
+            "request_id": "req_123"
+        }))
+        .unwrap();
+
+        assert_eq!(body.error.message, "temperature is not supported");
+        assert_eq!(body.error.error_type, "invalid_request_error");
     }
 }

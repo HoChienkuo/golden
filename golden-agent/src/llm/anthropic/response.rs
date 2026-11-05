@@ -68,4 +68,15 @@ pub struct Usage {
     /// The number of output tokens.
     #[serde(default)]
     pub output_tokens: u32,
+    /// Detailed output-token accounting, when returned by the API.
+    #[serde(default)]
+    pub output_tokens_details: Option<OutputTokensDetails>,
+}
+
+/// Detailed accounting for generated output tokens.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct OutputTokensDetails {
+    /// Tokens spent on internal reasoning.
+    #[serde(default)]
+    pub thinking_tokens: u32,
 }
