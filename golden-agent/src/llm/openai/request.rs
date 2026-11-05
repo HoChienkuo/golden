@@ -252,6 +252,8 @@ pub enum ServiceTier {
     Auto,
     Default,
     Flex,
+    /// OpenAI Fast Mode.
+    Fast,
     Priority,
 }
 

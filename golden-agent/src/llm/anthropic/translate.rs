@@ -1,14 +1,14 @@
 use serde_json::Value;
 
 use crate::llm::chat::{
-    ChatRequest, ChatResponse, Content, ContentPart, FinishReason, Message, Reasoning,
-    ReasoningEffort, Role, ToolCall, ToolChoice, Usage,
+    ChatRequest, ChatResponse, Content, ContentPart, FinishReason, InferenceSpeed, Message,
+    Reasoning, ReasoningEffort, Role, ToolCall, ToolChoice, Usage,
 };
 use crate::tool::FromToolSpec;
 
 use super::request::{
     ContentBlock, Effort, ImageSource, InputMessage, MessagesRequest, OutputConfig,
-    Role as AnthropicRole, Thinking,
+    Role as AnthropicRole, Speed, Thinking,
 };
 use super::response::{MessagesResponse, OutputBlock};
 use super::tool::{Tool, ToolChoice as AnthropicToolChoice};
@@ -44,6 +44,7 @@ pub(crate) fn build_request(
         top_p: request.top_p,
         stop_sequences: request.stop.clone(),
         stream: stream.then_some(true),
+        speed: (request.inference_speed == Some(InferenceSpeed::Fast)).then_some(Speed::Fast),
         thinking: request.reasoning.map(|reasoning| match reasoning {
             Reasoning::Disabled => Thinking::Disabled,
             Reasoning::Budget(tokens) => Thinking::Enabled {
@@ -76,6 +77,7 @@ fn to_effort(effort: ReasoningEffort) -> Effort {
 
 /// Translates a Messages API response into a neutral [`ChatResponse`].
 pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
+    let inference_speed = response.speed.map(InferenceSpeed::from_provider);
     let mut text = String::new();
     let mut reasoning = String::new();
     let mut signature = None;
@@ -129,6 +131,7 @@ pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
             total_tokens: response.usage.input_tokens + response.usage.output_tokens,
             reasoning_tokens: None,
         }),
+        inference_speed,
     }
 }
 
@@ -249,12 +252,47 @@ fn clamp_temperature(value: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::chat::{Message, Reasoning, ReasoningEffort};
+    use crate::llm::chat::{InferenceSpeed, Message, Reasoning, ReasoningEffort};
 
     fn body(reasoning: Option<Reasoning>) -> serde_json::Value {
-        let mut request = ChatRequest::new("deepseek-flash").add_message(Message::user("hi"));
+        let mut request = ChatRequest::new("claude").add_message(Message::user("hi"));
         request.reasoning = reasoning;
-        serde_json::to_value(build_request(&request, false, 4096)).unwrap()
+        request_body(&request)
+    }
+
+    fn request_body(request: &ChatRequest) -> serde_json::Value {
+        serde_json::to_value(build_request(request, false, 4096)).unwrap()
+    }
+
+    #[test]
+    fn fast_mode_maps_to_speed_and_is_independent_of_thinking() {
+        let request = ChatRequest::new("claude")
+            .add_message(Message::user("hi"))
+            .inference_speed(InferenceSpeed::Fast)
+            .reasoning(Reasoning::Budget(8_000));
+        let body = request_body(&request);
+        assert_eq!(body["speed"], "fast");
+        assert_eq!(body["thinking"]["budget_tokens"], 8_000);
+    }
+
+    #[test]
+    fn speed_unset_sends_no_speed_field() {
+        assert!(body(None).get("speed").is_none());
+    }
+
+    #[test]
+    fn response_preserves_actual_speed() {
+        let wire: MessagesResponse = serde_json::from_value(serde_json::json!({
+            "id": "message-1",
+            "model": "claude",
+            "content": [],
+            "speed": "fast",
+            "usage": {"input_tokens": 1, "output_tokens": 2}
+        }))
+        .unwrap();
+
+        let response = into_chat_response(wire);
+        assert_eq!(response.inference_speed, Some(InferenceSpeed::Fast));
     }
 
     #[test]

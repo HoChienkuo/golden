@@ -54,6 +54,7 @@ streaming — live in
 - [x] OpenAI-compatible protocol (OpenAI, DeepSeek, llama.cpp, Ollama)
 - [x] `#[tool]` tool declaration, registration, and per-provider rendering
 - [x] Reasoning / thinking mode (DeepSeek `thinking`, OpenAI `reasoning_effort`, Anthropic extended thinking)
+- [x] Provider-neutral Fast Mode (OpenAI `service_tier: "fast"`, Anthropic `speed: "fast"`)
 - [x] Anthropic Messages API
 - [ ] Google Gemini API
 - [x] String / prompt templates

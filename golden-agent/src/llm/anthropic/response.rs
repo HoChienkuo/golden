@@ -16,6 +16,9 @@ pub struct MessagesResponse {
     /// Why generation stopped.
     #[serde(default)]
     pub stop_reason: Option<String>,
+    /// The actual inference speed used by the provider.
+    #[serde(default)]
+    pub speed: Option<String>,
     /// Billing and rate-limit usage.
     #[serde(default)]
     pub usage: Usage,

@@ -23,6 +23,7 @@ pub struct OpenAiLlm {
     api_key: String,
     base_url: String,
     config: HttpConfig,
+    supports_fast_mode: bool,
 }
 
 impl OpenAiLlm {
@@ -39,12 +40,15 @@ impl OpenAiLlm {
             api_key: api_key.into(),
             base_url: base_url.into(),
             config,
+            supports_fast_mode: false,
         }
     }
 
     /// Constructs a client pointed at the official OpenAI endpoint.
     pub fn openai_default(api_key: impl Into<String>) -> Self {
-        Self::new("https://api.openai.com/v1", api_key)
+        let mut client = Self::new("https://api.openai.com/v1", api_key);
+        client.supports_fast_mode = true;
+        client
     }
 
     /// Replaces the HTTP reliability settings, rebuilding the underlying client.
@@ -67,7 +71,7 @@ impl OpenAiLlm {
 #[async_trait]
 impl ChatModel for OpenAiLlm {
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
-        let body = translate::to_wire_request(request, false);
+        let body = translate::to_wire_request(request, false, self.supports_fast_mode);
 
         let mut req = self
             .http
@@ -89,7 +93,7 @@ impl ChatModel for OpenAiLlm {
     }
 
     fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
-        let body = translate::to_wire_request(request, true);
+        let body = translate::to_wire_request(request, true, self.supports_fast_mode);
 
         let http = self.http.clone();
         let api_key = self.api_key.clone();

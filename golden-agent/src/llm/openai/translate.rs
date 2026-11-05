@@ -1,6 +1,6 @@
 use crate::llm::chat::{
-    ChatRequest, ChatResponse, Content, ContentPart, FinishReason, Message, Reasoning,
-    ReasoningEffort, ResponseFormat, Role, ToolCall, ToolChoice, Usage,
+    ChatRequest, ChatResponse, Content, ContentPart, FinishReason, InferenceSpeed, Message,
+    Reasoning, ReasoningEffort, ResponseFormat, Role, ToolCall, ToolChoice, Usage,
 };
 use crate::tool::FromToolSpec;
 
@@ -8,13 +8,17 @@ use super::{
     ChatRequest as WireRequest, ChatResponse as WireResponse, Content as WireContent,
     ContentPart as WireContentPart, Effort as WireEffort, FunctionCall, ImageUrl,
     JsonSchema as WireJsonSchema, Message as WireMessage, NamedFunction, NamedToolChoice,
-    ResponseFormat as WireResponseFormat, ResponseMessage as WireResponseMessage, Stop,
-    Thinking as WireThinking, ThinkingMode, Tool as WireTool, ToolCall as WireToolCall,
+    ResponseFormat as WireResponseFormat, ResponseMessage as WireResponseMessage, ServiceTier,
+    Stop, Thinking as WireThinking, ThinkingMode, Tool as WireTool, ToolCall as WireToolCall,
     ToolChoice as WireToolChoice, ToolChoiceMode, ToolType, Usage as WireUsage,
 };
 
 /// Translates a neutral [`ChatRequest`] into an OpenAI wire request.
-pub(crate) fn to_wire_request(request: &ChatRequest, stream: bool) -> WireRequest {
+pub(crate) fn to_wire_request(
+    request: &ChatRequest,
+    stream: bool,
+    supports_fast_mode: bool,
+) -> WireRequest {
     let mut wire = WireRequest::new(request.model.clone());
     wire.stream = Some(stream);
     wire.messages = request.messages.iter().map(to_wire_message).collect();
@@ -33,6 +37,9 @@ pub(crate) fn to_wire_request(request: &ChatRequest, stream: bool) -> WireReques
         .as_ref()
         .map(to_wire_response_format);
     to_wire_reasoning(request.reasoning, &mut wire);
+    if supports_fast_mode && request.inference_speed == Some(InferenceSpeed::Fast) {
+        wire.service_tier = Some(ServiceTier::Fast);
+    }
     wire
 }
 
@@ -90,6 +97,7 @@ fn to_wire_response_format(format: &ResponseFormat) -> WireResponseFormat {
 
 /// Translates an OpenAI wire response into a neutral [`ChatResponse`].
 pub(crate) fn from_wire_response(response: WireResponse) -> ChatResponse {
+    let inference_speed = response.service_tier.map(InferenceSpeed::from_provider);
     let Some(choice) = response.choices.into_iter().next() else {
         return ChatResponse {
             id: response.id,
@@ -97,6 +105,7 @@ pub(crate) fn from_wire_response(response: WireResponse) -> ChatResponse {
             message: Message::new(Role::Assistant, Content::Text(String::new())),
             finish_reason: None,
             usage: response.usage.map(from_wire_usage),
+            inference_speed,
         };
     };
 
@@ -106,6 +115,7 @@ pub(crate) fn from_wire_response(response: WireResponse) -> ChatResponse {
         message: from_wire_message(choice.message),
         finish_reason: choice.finish_reason.map(parse_finish_reason),
         usage: response.usage.map(from_wire_usage),
+        inference_speed,
     }
 }
 
@@ -232,15 +242,53 @@ fn from_wire_usage(usage: WireUsage) -> Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::chat::{Message, Reasoning, ReasoningEffort};
+    use crate::llm::chat::{InferenceSpeed, Message, Reasoning, ReasoningEffort};
 
     /// Serializes the wire body the API would receive for `request`.
     fn body(request: &ChatRequest) -> serde_json::Value {
-        serde_json::to_value(to_wire_request(request, false)).unwrap()
+        body_with_fast_mode_support(request, false)
+    }
+
+    fn body_with_fast_mode_support(
+        request: &ChatRequest,
+        supports_fast_mode: bool,
+    ) -> serde_json::Value {
+        serde_json::to_value(to_wire_request(request, false, supports_fast_mode)).unwrap()
     }
 
     fn request() -> ChatRequest {
         ChatRequest::new("deepseek-flash").add_message(Message::user("hi"))
+    }
+
+    #[test]
+    fn existing_priority_service_tier_remains_supported() {
+        let wire = WireRequest::new("gpt-5").service_tier(ServiceTier::Priority);
+        let body = serde_json::to_value(wire).unwrap();
+        assert_eq!(body["service_tier"], "priority");
+    }
+
+    #[test]
+    fn fast_mode_maps_to_fast_service_tier_for_openai() {
+        let request = request().inference_speed(InferenceSpeed::Fast);
+        let body = body_with_fast_mode_support(&request, true);
+        assert_eq!(body["service_tier"], "fast");
+    }
+
+    #[test]
+    fn fast_mode_is_omitted_for_openai_compatible_providers() {
+        let body = body(&request().inference_speed(InferenceSpeed::Fast));
+        assert!(body.get("service_tier").is_none());
+    }
+
+    #[test]
+    fn fast_mode_and_reasoning_are_independent() {
+        let request = request()
+            .inference_speed(InferenceSpeed::Fast)
+            .reasoning(Reasoning::Effort(ReasoningEffort::High));
+        let body = body_with_fast_mode_support(&request, true);
+        assert_eq!(body["service_tier"], "fast");
+        assert_eq!(body["reasoning_effort"], "high");
+        assert_eq!(body["thinking"], serde_json::json!({"type": "enabled"}));
     }
 
     #[test]
@@ -279,6 +327,25 @@ mod tests {
             assert_eq!(body["reasoning_effort"], expected, "effort {effort:?}");
             assert_eq!(body["thinking"], serde_json::json!({"type": "enabled"}));
         }
+    }
+
+    #[test]
+    fn response_preserves_actual_service_tier() {
+        let wire: WireResponse = serde_json::from_value(serde_json::json!({
+            "id": "response-1",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "gpt-5",
+            "choices": [],
+            "service_tier": "priority"
+        }))
+        .unwrap();
+
+        let response = from_wire_response(wire);
+        assert_eq!(
+            response.inference_speed,
+            Some(InferenceSpeed::Other("priority".into()))
+        );
     }
 
     #[test]

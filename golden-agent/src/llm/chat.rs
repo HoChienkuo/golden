@@ -374,6 +374,33 @@ pub enum ReasoningEffort {
     Max,
 }
 
+/// The requested inference speed.
+///
+/// Fast mode is independent of [`Reasoning`]: callers may enable both on the
+/// same request. Providers that do not explicitly support a speed are expected
+/// to ignore this setting rather than approximate it with reasoning controls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InferenceSpeed {
+    /// Use the provider's fast inference mode.
+    Fast,
+    /// A provider-specific speed value returned by an API.
+    ///
+    /// This variant preserves response values that do not have a neutral
+    /// representation. It is not sent in requests by built-in providers.
+    Other(String),
+}
+
+impl InferenceSpeed {
+    pub(crate) fn from_provider(value: String) -> Self {
+        if value == "fast" {
+            Self::Fast
+        } else {
+            Self::Other(value)
+        }
+    }
+}
+
 impl Reasoning {
     /// Returns the effort level this setting asks for, if it maps to one.
     ///
@@ -426,6 +453,10 @@ pub struct ChatRequest {
     ///
     /// `None` leaves the provider default untouched.
     pub reasoning: Option<Reasoning>,
+    /// The requested inference speed.
+    ///
+    /// `None` sends no speed field. Unsupported providers also omit the field.
+    pub inference_speed: Option<InferenceSpeed>,
 }
 
 impl ChatRequest {
@@ -442,6 +473,7 @@ impl ChatRequest {
             stop: None,
             response_format: None,
             reasoning: None,
+            inference_speed: None,
         }
     }
 
@@ -515,6 +547,27 @@ impl ChatRequest {
         self.reasoning = Some(reasoning);
         self
     }
+
+    /// Sets the inference speed independently of reasoning/thinking.
+    ///
+    /// Built-in providers map [`InferenceSpeed::Fast`] to OpenAI's
+    /// `service_tier: "fast"` or Anthropic's `speed: "fast"`. Providers with
+    /// no explicit Fast Mode support omit the setting.
+    ///
+    /// ```
+    /// use golden_agent::{ChatRequest, InferenceSpeed, Reasoning};
+    ///
+    /// let request = ChatRequest::new("model")
+    ///     .inference_speed(InferenceSpeed::Fast)
+    ///     .reasoning(Reasoning::Enabled);
+    ///
+    /// assert_eq!(request.inference_speed, Some(InferenceSpeed::Fast));
+    /// assert_eq!(request.reasoning, Some(Reasoning::Enabled));
+    /// ```
+    pub fn inference_speed(mut self, speed: InferenceSpeed) -> Self {
+        self.inference_speed = Some(speed);
+        self
+    }
 }
 
 /// A chat completion response.
@@ -530,6 +583,11 @@ pub struct ChatResponse {
     pub finish_reason: Option<FinishReason>,
     /// Token usage statistics.
     pub usage: Option<Usage>,
+    /// The actual provider-reported inference speed or service tier.
+    ///
+    /// This is populated for non-streaming responses when the provider returns
+    /// the information. Unknown values are preserved in [`InferenceSpeed::Other`].
+    pub inference_speed: Option<InferenceSpeed>,
 }
 
 impl ChatResponse {
@@ -560,6 +618,7 @@ impl ChatResponse {
     ///     message: Message::assistant(r#"{"temperature_c": 28.5}"#),
     ///     finish_reason: None,
     ///     usage: None,
+    ///     inference_speed: None,
     /// };
     ///
     /// #[derive(serde::Deserialize)]

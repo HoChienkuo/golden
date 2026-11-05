@@ -1,6 +1,6 @@
 [package]
 name = "golden-agent"
-version = "0.1.8"
+version = "0.1.9"
 edition.workspace = true
 authors.workspace = true
 description = "An annotation-driven agent engineering framework for Rust"

@@ -35,6 +35,9 @@ pub struct MessagesRequest {
     /// Whether to stream the response with server-sent events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    /// The inference speed to use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed: Option<Speed>,
     /// Extended thinking switch. When enabled, the model thinks before it
     /// answers and returns `thinking` content blocks.
     ///
@@ -46,6 +49,14 @@ pub struct MessagesRequest {
     /// Output tuning, including the thinking effort level.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_config: Option<OutputConfig>,
+}
+
+/// An Anthropic Messages API inference speed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Speed {
+    /// Anthropic Fast Mode.
+    Fast,
 }
 
 /// The `thinking` object of a Messages API request.
