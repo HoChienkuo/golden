@@ -1,6 +1,7 @@
 use crate::error::Error;
 use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream, Reasoning};
 use crate::llm::http::HttpConfig;
+use crate::llm::models::{ModelCatalog, ModelInfo};
 use crate::llm::openai::OpenAiLlm;
 use async_trait::async_trait;
 
@@ -76,6 +77,11 @@ impl DeepSeekLlm {
         &self.0
     }
 
+    /// Fetches the models available to the configured DeepSeek credentials.
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
+        self.0.list_models().await
+    }
+
     /// Switches thinking mode on or off for a base request.
     ///
     /// `true` sends `thinking: {"type": "enabled"}`, `false` sends
@@ -97,6 +103,13 @@ impl DeepSeekLlm {
         } else {
             Reasoning::Disabled
         })
+    }
+}
+
+#[async_trait]
+impl ModelCatalog for DeepSeekLlm {
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
+        DeepSeekLlm::list_models(self).await
     }
 }
 

@@ -23,8 +23,8 @@ pub use llm::chat::{
     ToolCall, ToolChoice, Usage,
 };
 pub use llm::{
-    AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, HttpConfig, LlamaCppLlm, OllamaLlm,
-    OpenAiLlm, OpenAiModel,
+    AnthropicLlm, AnthropicModel, DeepSeekLlm, DeepSeekModel, HttpConfig, LlamaCppLlm,
+    ModelCatalog, ModelInfo, OllamaLlm, OpenAiLlm, OpenAiModel,
 };
 pub use tool::{
     FromToolSpec, Tool, ToolDefinition, ToolSchema, ToolSpec, registered_tools, render_tools,

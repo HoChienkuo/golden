@@ -11,6 +11,7 @@ use crate::llm::chat::{
     ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream, ContentPart, PartialToolCall,
 };
 use crate::llm::http::HttpConfig;
+use crate::llm::models::{ModelCatalog, ModelInfo};
 
 use super::response::MessagesResponse;
 use super::translate;
@@ -60,9 +61,67 @@ impl AnthropicLlm {
         self
     }
 
+    /// Fetches all models available to the configured Anthropic credentials.
+    ///
+    /// Anthropic's endpoint is paginated, so this method follows `after_id`
+    /// cursors until every page has been collected. The official response does
+    /// not currently include context-window sizes; compatible responses that do
+    /// include `context_window` are supported.
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
+        let mut models = Vec::new();
+        let mut after_id: Option<String> = None;
+
+        loop {
+            let mut request = self
+                .http
+                .get(self.models_endpoint())
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", MESSAGES_API_VERSION)
+                .query(&[("limit", "1000")]);
+            if let Some(cursor) = after_id.as_deref() {
+                request = request.query(&[("after_id", cursor)]);
+            }
+
+            let response = self.config.bound(request).send().await?;
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.json::<ApiErrorBody>().await.ok();
+                return Err(Error::api(status, body));
+            }
+
+            let page = response.json::<ModelsPage>().await?;
+            let next_cursor = page.last_id.clone();
+            models.extend(page.data.into_iter().map(ModelInfo::from));
+
+            if !page.has_more {
+                break;
+            }
+            let Some(next_cursor) = next_cursor else {
+                break;
+            };
+            if after_id.as_ref() == Some(&next_cursor) {
+                break;
+            }
+            after_id = Some(next_cursor);
+        }
+
+        Ok(models)
+    }
+
     /// Returns the Messages API endpoint.
     fn endpoint(&self) -> String {
         format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
+    }
+
+    fn models_endpoint(&self) -> String {
+        format!("{}/v1/models", self.base_url.trim_end_matches('/'))
+    }
+}
+
+#[async_trait]
+impl ModelCatalog for AnthropicLlm {
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
+        AnthropicLlm::list_models(self).await
     }
 }
 
@@ -143,6 +202,39 @@ impl ChatModel for AnthropicLlm {
                 yield item;
             }
         })
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ModelsPage {
+    #[serde(default)]
+    data: Vec<ModelObject>,
+    #[serde(default)]
+    has_more: bool,
+    #[serde(default)]
+    last_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ModelObject {
+    id: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    context_window: Option<u64>,
+}
+
+impl From<ModelObject> for ModelInfo {
+    fn from(model: ModelObject) -> Self {
+        Self {
+            id: model.id,
+            display_name: model.display_name,
+            owned_by: Some("anthropic".to_string()),
+            created_at: model.created_at,
+            context_window: model.context_window,
+        }
     }
 }
 
@@ -403,6 +495,36 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_page_preserves_pagination_and_metadata() {
+        let page: ModelsPage = serde_json::from_value(serde_json::json!({
+            "data": [{
+                "type": "model",
+                "id": "claude-test",
+                "display_name": "Claude Test",
+                "created_at": "2026-01-01T00:00:00Z",
+                "context_window": 200000
+            }],
+            "has_more": true,
+            "first_id": "claude-test",
+            "last_id": "claude-test"
+        }))
+        .unwrap();
+
+        assert!(page.has_more);
+        assert_eq!(page.last_id.as_deref(), Some("claude-test"));
+        assert_eq!(
+            ModelInfo::from(page.data.into_iter().next().unwrap()),
+            ModelInfo {
+                id: "claude-test".to_string(),
+                display_name: Some("Claude Test".to_string()),
+                owned_by: Some("anthropic".to_string()),
+                created_at: Some("2026-01-01T00:00:00Z".to_string()),
+                context_window: Some(200_000),
+            }
+        );
+    }
 
     #[tokio::test]
     async fn multibyte_character_split_across_chunks_is_not_mangled() {
