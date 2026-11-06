@@ -57,6 +57,7 @@ streaming — live in
 - [x] Provider-neutral Fast Mode (OpenAI `service_tier: "fast"`, Anthropic `speed: "fast"`)
 - [x] Anthropic Messages API
 - [x] Model listing (OpenAI, DeepSeek, Anthropic, llama.cpp, Ollama)
+- [x] Per-call token usage and context occupancy
 - [ ] Google Gemini API
 - [x] String / prompt templates
 - [x] Structured output (`response_format` and typed parsing)

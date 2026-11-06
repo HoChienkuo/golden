@@ -1,4 +1,4 @@
-use crate::llm::chat::{Message, Role};
+use crate::llm::chat::{Message, Role, Usage};
 
 use super::state::AgentState;
 
@@ -6,12 +6,18 @@ use super::state::AgentState;
 #[derive(Debug, Clone)]
 pub struct AgentResult {
     state: AgentState,
+    usage: Option<Usage>,
 }
 
 impl AgentResult {
     /// Wraps the finished state.
-    pub(crate) fn new(state: AgentState) -> Self {
-        Self { state }
+    pub(crate) fn new(state: AgentState, usage: Option<Usage>) -> Self {
+        Self { state, usage }
+    }
+
+    /// Token usage of the final model call, when reported by the provider.
+    pub fn usage(&self) -> Option<&Usage> {
+        self.usage.as_ref()
     }
 
     /// The full conversation, including tool calls and their results.

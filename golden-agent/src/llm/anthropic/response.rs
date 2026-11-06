@@ -67,6 +67,10 @@ pub struct Usage {
     /// The number of input tokens.
     #[serde(default)]
     pub input_tokens: u32,
+    /// Input tokens written to the prompt cache.
+    pub cache_creation_input_tokens: Option<u32>,
+    /// Input tokens read from the prompt cache.
+    pub cache_read_input_tokens: Option<u32>,
     /// The number of output tokens.
     #[serde(default)]
     pub output_tokens: u32,

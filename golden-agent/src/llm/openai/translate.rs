@@ -296,7 +296,7 @@ fn parse_finish_reason(reason: String) -> FinishReason {
     }
 }
 
-fn from_wire_usage(usage: WireUsage) -> Usage {
+pub(super) fn from_wire_usage(usage: WireUsage) -> Usage {
     Usage {
         prompt_tokens: usage.prompt_tokens,
         completion_tokens: usage.completion_tokens,

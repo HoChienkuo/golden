@@ -12,6 +12,7 @@ mod tests;
 
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
 
 use futures_core::Stream;
 use futures_util::StreamExt;
@@ -21,7 +22,7 @@ use crate::checkpointer::CheckpointMessage;
 use crate::checkpointer::Checkpointer;
 use crate::error::Error;
 use crate::llm::chat::{
-    ChatEvent, ChatModel, ChatRequest, Content, ContentPart, Message, Role, ToolCall,
+    ChatEvent, ChatModel, ChatRequest, Content, ContentPart, Message, Role, ToolCall, Usage,
 };
 use crate::store::Store;
 use crate::store::{RecallTool, RememberTool};
@@ -85,7 +86,41 @@ pub enum AgentEvent {
 }
 
 /// A stream of [`AgentEvent`]s produced by [`Agent::stream`].
-pub type AgentStream<'a> = Pin<Box<dyn Stream<Item = Result<AgentEvent, Error>> + Send + 'a>>;
+pub struct AgentStream<'a> {
+    inner: Pin<Box<dyn Stream<Item = Result<StreamUpdate, Error>> + Send + 'a>>,
+    usage: Option<Usage>,
+}
+
+impl AgentStream<'_> {
+    /// Usage of the latest completed model call while polling this stream.
+    ///
+    /// Returns `None` before a call completes or if the latest completed call
+    /// did not report usage.
+    pub fn usage(&self) -> Option<&Usage> {
+        self.usage.as_ref()
+    }
+}
+
+impl Stream for AgentStream<'_> {
+    type Item = Result<AgentEvent, Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            match std::task::ready!(this.inner.as_mut().poll_next(cx)) {
+                Some(Ok(StreamUpdate::Usage(usage))) => this.usage = usage,
+                Some(Ok(StreamUpdate::Event(event))) => return Poll::Ready(Some(Ok(event))),
+                Some(Err(error)) => return Poll::Ready(Some(Err(error))),
+                None => return Poll::Ready(None),
+            }
+        }
+    }
+}
+
+enum StreamUpdate {
+    Event(AgentEvent),
+    Usage(Option<Usage>),
+}
 
 /// A ReAct-style agent.
 ///
@@ -145,8 +180,8 @@ impl Agent {
     ) -> Result<AgentResult, Error> {
         let mut pending: Vec<Message> = messages.into_iter().collect();
         let mut state = self.start_run(context, &pending).await?;
-        self.run(&mut state, &mut pending).await?;
-        Ok(AgentResult::new(state))
+        let usage = self.run(&mut state, &mut pending).await?;
+        Ok(AgentResult::new(state, usage))
     }
 
     /// Streams a run on a single input message with an empty context.
@@ -185,7 +220,7 @@ impl Agent {
         let config = self.config.clone();
         let model = Arc::clone(&self.model);
 
-        Box::pin(async_stream::stream! {
+        let inner = Box::pin(async_stream::stream! {
             let mut state = match self.start_run(context, &pending).await {
                 Ok(state) => state,
                 Err(error) => {
@@ -226,23 +261,25 @@ impl Agent {
                 let mut reasoning_signature = None;
                 let mut completed_parts: Vec<ContentPart> = Vec::new();
                 let mut tool_calls: Vec<ToolCall> = Vec::new();
+                let mut usage = None;
 
                 let mut stream = model.chat_stream(&step_request);
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(ChatEvent::Reasoning(delta)) => {
                             reasoning.push_str(&delta);
-                            yield Ok(AgentEvent::Reasoning(delta));
+                            yield Ok(StreamUpdate::Event(AgentEvent::Reasoning(delta)));
                         }
                         Ok(ChatEvent::ReasoningSignature(signature)) => {
                             reasoning_signature = Some(signature);
                         }
                         Ok(ChatEvent::Text(delta)) => {
                             text.push_str(&delta);
-                            yield Ok(AgentEvent::Text(delta));
+                            yield Ok(StreamUpdate::Event(AgentEvent::Text(delta)));
                         }
                         Ok(ChatEvent::ContentPart(part)) => completed_parts.push(part),
                         Ok(ChatEvent::ToolCall(call)) => tool_calls.push(call),
+                        Ok(ChatEvent::Usage(value)) => usage = Some(value),
                         Err(error) => {
                             yield Err(error);
                             return;
@@ -271,6 +308,8 @@ impl Agent {
                     }
                 }
 
+                yield Ok(StreamUpdate::Usage(usage));
+
                 if tool_calls.is_empty() {
                     if let Err(error) = self.persist_step(&state, &mut pending).await {
                         yield Err(error);
@@ -282,13 +321,13 @@ impl Agent {
                             return;
                         }
                     }
-                    yield Ok(AgentEvent::Done);
+                    yield Ok(StreamUpdate::Event(AgentEvent::Done));
                     return;
                 }
 
                 // Announce every call the model requested before running any.
                 for call in &tool_calls {
-                    yield Ok(AgentEvent::ToolCall(call.clone()));
+                    yield Ok(StreamUpdate::Event(AgentEvent::ToolCall(call.clone())));
                 }
 
                 // Run the batch concurrently, yielding each result live in
@@ -312,7 +351,7 @@ impl Agent {
                         Err(error) => (format!("Error: {error}"), false),
                     };
                     results[index] = Some((call.clone(), content.clone(), ok));
-                    yield Ok(AgentEvent::ToolResult { call, content });
+                    yield Ok(StreamUpdate::Event(AgentEvent::ToolResult { call, content }));
                 }
 
 
@@ -358,11 +397,12 @@ impl Agent {
                             return;
                         }
                     }
-                    yield Ok(AgentEvent::Done);
+                    yield Ok(StreamUpdate::Event(AgentEvent::Done));
                     return;
                 }
             }
-        })
+        });
+        AgentStream { inner, usage: None }
     }
 
     /// Returns the tools the agent may call.
@@ -400,7 +440,11 @@ impl Agent {
         Ok(AgentState { messages, context })
     }
 
-    async fn run(&self, state: &mut AgentState, pending: &mut Vec<Message>) -> Result<(), Error> {
+    async fn run(
+        &self,
+        state: &mut AgentState,
+        pending: &mut Vec<Message>,
+    ) -> Result<Option<Usage>, Error> {
         for middleware in &self.middlewares {
             middleware.before_agent(state).await?;
         }
@@ -409,7 +453,7 @@ impl Agent {
         let tool = middleware::tool_chain(self.tools.clone(), &self.middlewares);
 
         let mut steps = 0;
-        loop {
+        let usage = loop {
             if steps >= self.config.max_steps {
                 return Err(Error::MaxStepsExceeded {
                     steps: self.config.max_steps,
@@ -430,7 +474,7 @@ impl Agent {
             if response.message.tool_calls.is_empty() {
                 // persist if last
                 self.persist_step(state, pending).await?;
-                break;
+                break response.usage;
             }
 
             let calls = response.message.tool_calls.clone();
@@ -467,18 +511,18 @@ impl Agent {
             if let Some(content) = direct {
                 record_message(state, pending, Message::assistant(direct_answer(&content)));
                 self.persist_step(state, pending).await?;
-                break;
+                break response.usage;
             }
 
             self.persist_step(state, pending).await?;
             steps += 1;
-        }
+        };
 
         for middleware in &self.middlewares {
             middleware.after_agent(state).await?;
         }
 
-        Ok(())
+        Ok(usage)
     }
 
     /// Builds the request for one step from the base request.

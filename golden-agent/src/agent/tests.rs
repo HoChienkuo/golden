@@ -1,10 +1,10 @@
 use crate::{
     Agent, AgentEvent, AgentState, ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream,
     CheckpointMessage, Checkpointer, Context, DynamicPrompt, Error, InMemoryCheckpointer, Message,
-    Role, ThreadId,
+    Role, ThreadId, Usage,
 };
 use async_trait::async_trait;
-use futures_util::TryStreamExt;
+use futures_util::StreamExt;
 
 struct EchoSystemPrompt;
 
@@ -18,7 +18,7 @@ impl ChatModel for EchoSystemPrompt {
             model: "mock".into(),
             message: Message::assistant(system.text()),
             finish_reason: None,
-            usage: None,
+            usage: Some(usage()),
             inference_speed: None,
         })
     }
@@ -27,7 +27,19 @@ impl ChatModel for EchoSystemPrompt {
         let system = &request.messages[0];
         assert_eq!(system.role, Role::System);
         let event = ChatEvent::Text(system.text().to_owned());
-        Box::pin(futures_util::stream::iter([Ok(event)]))
+        Box::pin(futures_util::stream::iter([
+            Ok(event),
+            Ok(ChatEvent::Usage(usage())),
+        ]))
+    }
+}
+
+fn usage() -> Usage {
+    Usage {
+        prompt_tokens: 33_000,
+        completion_tokens: 100,
+        total_tokens: 33_100,
+        reasoning_tokens: None,
     }
 }
 
@@ -41,6 +53,7 @@ async fn default_prompt_preserves_an_existing_leading_system_message() {
 
     let result = agent.invoke(Message::user("hello")).await.unwrap();
     assert_eq!(result.text(), "You are a helpful assistant.");
+    assert_eq!(result.usage(), Some(&usage()));
 
     let result = agent
         .invoke_messages([Message::system("custom"), Message::user("hello")])
@@ -82,18 +95,17 @@ async fn dynamic_prompt_replaces_the_default_without_changing_checkpoint_history
     let mut context = Context::new();
     context.insert(ThreadId("thread".to_owned()));
 
-    let events: Vec<_> = agent
-        .stream_with_context(Message::user("stream question"), context.clone())
-        .try_collect()
-        .await
-        .unwrap();
+    let mut stream = agent.stream_with_context(Message::user("stream question"), context.clone());
+    assert_eq!(stream.usage(), None);
     assert_eq!(
-        events,
-        [
-            AgentEvent::Text("dynamic for stream question".into()),
-            AgentEvent::Done,
-        ]
+        stream.next().await.unwrap().unwrap(),
+        AgentEvent::Text("dynamic for stream question".into()),
     );
+    assert_eq!(stream.usage(), None);
+    assert_eq!(stream.next().await.unwrap().unwrap(), AgentEvent::Done);
+    assert_eq!(stream.usage(), Some(&usage()));
+    assert!(stream.next().await.is_none());
+    assert_eq!(stream.usage(), Some(&usage()));
 
     let result = agent
         .invoke_with_context(Message::user("invoke question"), context.clone())

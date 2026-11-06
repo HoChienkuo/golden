@@ -123,7 +123,8 @@ impl ChatModel for OpenAiLlm {
     }
 
     fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
-        let body = translate::to_wire_request(request, true, self.supports_fast_mode);
+        let body = translate::to_wire_request(request, true, self.supports_fast_mode)
+            .stream_options(super::request::StreamOptions::include_usage());
 
         let http = self.http.clone();
         let api_key = self.api_key.clone();
@@ -177,6 +178,10 @@ struct SseLineStream<S> {
 impl<S> SseLineStream<S> {
     /// Merges a parsed chunk into the pending events and tool-call buffers.
     fn handle_chunk(&mut self, chunk: StreamData) {
+        if let Some(usage) = chunk.usage {
+            self.pending
+                .push_back(ChatEvent::Usage(translate::from_wire_usage(usage)));
+        }
         for choice in chunk.choices {
             if let Some(reasoning) = choice.delta.reasoning_content
                 && !reasoning.is_empty()
@@ -342,6 +347,7 @@ impl From<ModelObject> for ModelInfo {
 struct StreamData {
     #[serde(default)]
     choices: Vec<StreamDeltaChoice>,
+    usage: Option<super::response::Usage>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -461,6 +467,27 @@ mod tests {
 
         assert_eq!(text, "你好");
         assert!(!text.contains('\u{FFFD}'));
+    }
+
+    #[tokio::test]
+    async fn final_stream_chunk_reports_usage_even_without_choices() {
+        let inner = futures_util::stream::iter([Ok(Bytes::from_static(
+            b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":33000,\"completion_tokens\":100,\"total_tokens\":33100}}\n\ndata: [DONE]\n\n",
+        ))]);
+        let mut stream = SseLineStream {
+            inner,
+            buffer: Vec::new(),
+            done: false,
+            pending: VecDeque::new(),
+            tool_calls: BTreeMap::new(),
+        };
+
+        let ChatEvent::Usage(usage) = stream.next().await.unwrap().unwrap() else {
+            panic!("expected usage");
+        };
+        assert_eq!(usage.prompt_tokens, 33_000);
+        assert_eq!(usage.total_tokens, 33_100);
+        assert!(stream.next().await.is_none());
     }
 
     #[tokio::test]

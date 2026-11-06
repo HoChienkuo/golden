@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures_core::Stream;
 use futures_util::StreamExt;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::error::{ApiErrorBody, Error};
 use crate::llm::chat::{
@@ -196,6 +196,7 @@ impl ChatModel for AnthropicLlm {
                 done: false,
                 pending: VecDeque::new(),
                 blocks: BTreeMap::new(),
+                usage: Map::new(),
             };
 
             while let Some(item) = events.next().await {
@@ -256,6 +257,7 @@ struct AnthropicSseStream<S> {
     done: bool,
     pending: VecDeque<ChatEvent>,
     blocks: BTreeMap<usize, PartialContentBlock>,
+    usage: Map<String, Value>,
 }
 
 /// A content block being assembled from Anthropic SSE deltas.
@@ -297,7 +299,21 @@ impl<S> AnthropicSseStream<S> {
             Some("content_block_start") => self.start_block(&value),
             Some("content_block_delta") => self.push_delta(&value),
             Some("content_block_stop") => self.stop_block(&value),
-            Some("message_stop") => self.done = true,
+            Some("message_start") => self.update_usage(value.pointer("/message/usage")),
+            Some("message_delta") => self.update_usage(value.get("usage")),
+            Some("message_stop") => {
+                self.done = true;
+                if self.usage.contains_key("input_tokens") {
+                    let usage = match serde_json::from_value(Value::Object(std::mem::take(
+                        &mut self.usage,
+                    ))) {
+                        Ok(usage) => usage,
+                        Err(error) => return Some(Error::Stream(error.to_string())),
+                    };
+                    self.pending
+                        .push_back(ChatEvent::Usage(translate::from_wire_usage(usage)));
+                }
+            }
             Some("error") => {
                 let message = value
                     .pointer("/error/message")
@@ -309,6 +325,18 @@ impl<S> AnthropicSseStream<S> {
         }
 
         None
+    }
+
+    /// Updates the latest cumulative counters without discarding absent fields.
+    fn update_usage(&mut self, usage: Option<&Value>) {
+        if let Some(fields) = usage.and_then(Value::as_object) {
+            self.usage.extend(
+                fields
+                    .iter()
+                    .filter(|(_, value)| !value.is_null())
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+        }
     }
 
     /// Starts accumulating an ordered response content block.
@@ -552,6 +580,7 @@ data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_d
             done: false,
             pending: VecDeque::new(),
             blocks: BTreeMap::new(),
+            usage: Map::new(),
         };
 
         let mut text = String::new();
@@ -566,6 +595,32 @@ data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_d
     }
 
     #[tokio::test]
+    async fn final_usage_merges_cumulative_counters_and_counts_cached_input() {
+        let inner = futures_util::stream::iter([Ok(Bytes::from_static(
+            b"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3000,\"cache_read_input_tokens\":20000,\"cache_creation_input_tokens\":10000,\"output_tokens\":1}}}\n\
+              data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":60}}\n\
+              data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":100}}\n\
+              data: {\"type\":\"message_stop\"}\n",
+        ))]);
+        let mut stream = AnthropicSseStream {
+            inner,
+            buffer: Vec::new(),
+            done: false,
+            pending: VecDeque::new(),
+            blocks: BTreeMap::new(),
+            usage: Map::new(),
+        };
+
+        let ChatEvent::Usage(usage) = stream.next().await.unwrap().unwrap() else {
+            panic!("expected usage");
+        };
+        assert_eq!(usage.prompt_tokens, 33_000);
+        assert_eq!(usage.completion_tokens, 100);
+        assert_eq!(usage.total_tokens, 33_100);
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
     async fn premature_eof_is_reported_as_an_error() {
         let inner = futures_util::stream::empty::<Result<Bytes, reqwest::Error>>();
         let mut stream = AnthropicSseStream {
@@ -574,6 +629,7 @@ data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_d
             done: false,
             pending: VecDeque::new(),
             blocks: BTreeMap::new(),
+            usage: Map::new(),
         };
 
         assert!(matches!(stream.next().await, Some(Err(Error::Stream(_)))));
@@ -588,6 +644,7 @@ data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_d
             done: false,
             pending: VecDeque::new(),
             blocks: BTreeMap::new(),
+            usage: Map::new(),
         };
 
         assert!(

@@ -114,24 +114,28 @@ pub(crate) fn into_chat_response(response: MessagesResponse) -> ChatResponse {
         })
         .collect();
 
-    let reasoning_tokens = response
-        .usage
-        .output_tokens_details
-        .as_ref()
-        .map(|details| details.thinking_tokens);
-
     ChatResponse {
         id: response.id,
         model: response.model,
         message: Message::parts(Role::Assistant, parts),
         finish_reason: response.stop_reason.as_deref().map(parse_finish_reason),
-        usage: Some(Usage {
-            prompt_tokens: response.usage.input_tokens,
-            completion_tokens: response.usage.output_tokens,
-            total_tokens: response.usage.input_tokens + response.usage.output_tokens,
-            reasoning_tokens,
-        }),
+        usage: Some(from_wire_usage(response.usage)),
         inference_speed,
+    }
+}
+
+pub(super) fn from_wire_usage(usage: super::response::Usage) -> Usage {
+    let prompt_tokens = usage
+        .input_tokens
+        .saturating_add(usage.cache_creation_input_tokens.unwrap_or_default())
+        .saturating_add(usage.cache_read_input_tokens.unwrap_or_default());
+    Usage {
+        prompt_tokens,
+        completion_tokens: usage.output_tokens,
+        total_tokens: prompt_tokens.saturating_add(usage.output_tokens),
+        reasoning_tokens: usage
+            .output_tokens_details
+            .map(|details| details.thinking_tokens),
     }
 }
 

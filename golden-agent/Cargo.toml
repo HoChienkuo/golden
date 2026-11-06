@@ -42,6 +42,10 @@ name = "agent_stream"
 path = "examples/agent_stream.rs"
 
 [[example]]
+name = "agent_usage"
+path = "examples/agent_usage.rs"
+
+[[example]]
 name = "dynamic_prompt"
 path = "examples/dynamic_prompt.rs"
 

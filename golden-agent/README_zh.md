@@ -54,6 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - [x] Provider-neutral Fast Mode（OpenAI `service_tier: "fast"`、Anthropic `speed: "fast"`）
 - [x] Anthropic Messages API
 - [x] 模型列表（OpenAI、DeepSeek、Anthropic、llama.cpp、Ollama）
+- [x] 单次模型调用的 token 用量与上下文占用率
 - [ ] Google Gemini API
 - [x] 字符串模板 / prompt 模板
 - [x] 结构化输出（`response_format` 与类型化解析）

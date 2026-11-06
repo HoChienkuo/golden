@@ -13,6 +13,6 @@ pub use chat::{ChatEvent, ChatModel, ChatStream, InferenceSpeed};
 pub use deepseek::{DeepSeekLlm, DeepSeekModel};
 pub use http::HttpConfig;
 pub use llamacpp::LlamaCppLlm;
-pub use models::{ModelCatalog, ModelInfo};
+pub use models::{ContextUsage, ModelCatalog, ModelInfo};
 pub use ollama::OllamaLlm;
 pub use openai::{OpenAiLlm, OpenAiModel};

@@ -35,6 +35,8 @@ pub enum ChatEvent {
     ContentPart(ContentPart),
     /// A tool call the model finished streaming.
     ToolCall(ToolCall),
+    /// Final token usage for this model call, when reported by the provider.
+    Usage(Usage),
 }
 
 /// A stream of incremental events produced by a streaming chat completion.
