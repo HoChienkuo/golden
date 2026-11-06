@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use crate::agent::AgentState;
 use crate::error::Error;
-use crate::llm::chat::{Content, Message, Role};
+use crate::llm::chat::{Content, Role};
 
 use super::middleware::Middleware;
 
@@ -12,6 +12,7 @@ use super::middleware::Middleware;
 /// [`context`](AgentState::context) — and returns the system prompt to use. It
 /// runs on the `before_model` hook, so it applies to both
 /// [`Agent::invoke`](crate::Agent::invoke) and [`Agent::stream`](crate::Agent::stream).
+/// It replaces the leading system message initialized by the agent.
 ///
 /// ```
 /// use golden_agent::{AgentState, DynamicPrompt};
@@ -38,14 +39,18 @@ where
     F: Fn(&AgentState) -> String + Send + Sync,
 {
     async fn before_model(&self, state: &mut AgentState) -> Result<(), Error> {
-        let prompt = (self.render)(state);
-
-        match state.messages.first_mut() {
-            Some(message) if message.role == Role::System => {
-                message.content = Content::Text(prompt);
-            }
-            _ => state.messages.insert(0, Message::system(prompt)),
+        if !state
+            .messages
+            .first()
+            .is_some_and(|message| message.role == Role::System)
+        {
+            return Err(Error::InvalidRequest {
+                message: "DynamicPrompt requires a leading system message".to_string(),
+            });
         }
+
+        let prompt = (self.render)(state);
+        state.messages[0].content = Content::Text(prompt);
 
         Ok(())
     }

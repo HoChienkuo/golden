@@ -62,7 +62,8 @@ streaming — live in
 - [x] Conversation history and context management (`Checkpointer`, InMemory / SQLite / MySQL / PostgreSQL)
 - [x] Long-term memory (`Store` with `remember` / `recall` tools, InMemory / SQLite / MySQL / PostgreSQL)
 - [x] Automatic tool-calling loop (agents)
-- [x] Middleware hooks (`Retry`, `DynamicPrompt`, `SlidingWindow`)
+- [x] Middleware hooks (`Retry`, `DynamicPrompt`) and a default agent system prompt
+- [ ] Sliding window for model context (`SlidingWindow`)
 - [ ] History compaction and summarization (`Summarizer` / compaction middleware)
 - [ ] Stateful tools
 - [ ] MCP tool sources

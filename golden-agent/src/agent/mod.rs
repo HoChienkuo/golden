@@ -7,6 +7,9 @@ mod result;
 mod state;
 mod tools;
 
+#[cfg(test)]
+mod tests;
+
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -25,7 +28,7 @@ use crate::store::{RecallTool, RememberTool};
 
 pub use context::Context;
 pub use metadata::{RunId, ThreadId};
-pub use middleware::{DynamicPrompt, Middleware, ModelHandler, Retry, SlidingWindow, ToolHandler};
+pub use middleware::{DynamicPrompt, Middleware, ModelHandler, Retry, ToolHandler};
 pub use result::AgentResult;
 pub use state::AgentState;
 pub use tools::ToolSet;
@@ -132,35 +135,17 @@ impl Agent {
 
     /// Runs the agent on an existing conversation with the given run context.
     ///
-    /// The [`system_prompt`](AgentBuilder::system_prompt), if any, is prepended,
-    /// and `context` becomes [`AgentState::context`].
+    /// The conversation starts with a system message. See
+    /// [`AgentBuilder::system_prompt`] for how it is selected.
+    /// The supplied `context` becomes [`AgentState::context`].
     pub async fn invoke_messages_with_context(
         &self,
         messages: impl IntoIterator<Item = Message>,
         context: Context,
     ) -> Result<AgentResult, Error> {
-        let mut state = AgentState::new();
-        state.context = context;
-
-        if state.context.get::<RunId>().is_none() {
-            state.context.insert(RunId(generate_id()));
-        }
-
-        if let Some(cp) = &self.checkpointer
-            && let Some(tid) = state.context.get::<ThreadId>()
-        {
-            let loaded = cp.load(&tid.0).await?;
-            state.messages.extend(loaded.into_iter().map(Message::from));
-        }
-
-        if let Some(prompt) = &self.system_prompt {
-            apply_system_prompt(&mut state.messages, prompt);
-        }
-
-        let mut cursor = state.messages.len();
-        state.messages.extend(messages);
-
-        self.run(&mut state, &mut cursor).await?;
+        let mut pending: Vec<Message> = messages.into_iter().collect();
+        let mut state = self.start_run(context, &pending).await?;
+        self.run(&mut state, &mut pending).await?;
         Ok(AgentResult::new(state))
     }
 
@@ -193,43 +178,21 @@ impl Agent {
         messages: impl IntoIterator<Item = Message>,
         context: Context,
     ) -> AgentStream<'_> {
-        let input: Vec<Message> = messages.into_iter().collect();
-        let system_prompt = self.system_prompt.clone();
+        let mut pending: Vec<Message> = messages.into_iter().collect();
         let middlewares = self.middlewares.clone();
         let tools = self.tools.clone();
         let request = self.request.clone();
         let config = self.config.clone();
         let model = Arc::clone(&self.model);
-        let checkpointer = self.checkpointer.clone();
 
         Box::pin(async_stream::stream! {
-            let mut state = AgentState::new();
-            state.context = context;
-
-            if state.context.get::<RunId>().is_none() {
-                state.context.insert(RunId(generate_id()));
-            }
-
-            if let Some(cp) = &checkpointer
-                && let Some(tid) = state.context.get::<ThreadId>()
-            {
-                match cp.load(&tid.0).await {
-                    Ok(loaded) => {
-                        state.messages.extend(loaded.into_iter().map(Message::from));
-                    }
-                    Err(error) => {
-                        yield Err(error);
-                        return;
-                    }
+            let mut state = match self.start_run(context, &pending).await {
+                Ok(state) => state,
+                Err(error) => {
+                    yield Err(error);
+                    return;
                 }
-            }
-
-            if let Some(prompt) = &system_prompt {
-                apply_system_prompt(&mut state.messages, prompt);
-            }
-
-            let mut cursor = state.messages.len();
-            state.messages.extend(input);
+            };
 
             for middleware in &middlewares {
                 if let Err(error) = middleware.before_agent(&mut state).await {
@@ -299,7 +262,7 @@ impl Agent {
                     tool_calls = message.tool_calls.clone();
                     message
                 };
-                state.messages.push(message);
+                record_message(&mut state, &mut pending, message);
 
                 for middleware in &middlewares {
                     if let Err(error) = middleware.after_model(&mut state).await {
@@ -309,9 +272,7 @@ impl Agent {
                 }
 
                 if tool_calls.is_empty() {
-                    if let Err(error) = persist_step_stream(
-                        &checkpointer, &state, &mut cursor,
-                    ).await {
+                    if let Err(error) = self.persist_step(&state, &mut pending).await {
                         yield Err(error);
                         return;
                     }
@@ -362,16 +323,15 @@ impl Agent {
                     if ok && direct.is_none() && returns_direct(&tools, &call.name) {
                         direct = Some(content.clone());
                     }
-                    state.messages.push(if ok {
+                    let message = if ok {
                         Message::tool(call.id.clone(), content)
                     } else {
                         Message::tool_error(call.id.clone(), content)
-                    });
+                    };
+                    record_message(&mut state, &mut pending, message);
                 }
 
-                if let Err(error) = persist_step_stream(
-                    &checkpointer, &state, &mut cursor,
-                ).await {
+                if let Err(error) = self.persist_step(&state, &mut pending).await {
                     yield Err(error);
                     return;
                 }
@@ -383,12 +343,12 @@ impl Agent {
                 // as the last assistant message and end the run without
                 // another model call.
                 if let Some(content) = direct {
-                    state
-                        .messages
-                        .push(Message::assistant(direct_answer(&content)));
-                    if let Err(error) = persist_step_stream(
-                        &checkpointer, &state, &mut cursor,
-                    ).await {
+                    record_message(
+                        &mut state,
+                        &mut pending,
+                        Message::assistant(direct_answer(&content)),
+                    );
+                    if let Err(error) = self.persist_step(&state, &mut pending).await {
                         yield Err(error);
                         return;
                     }
@@ -410,7 +370,37 @@ impl Agent {
         &self.tools
     }
 
-    async fn run(&self, state: &mut AgentState, cursor: &mut usize) -> Result<(), Error> {
+    async fn start_run(
+        &self,
+        mut context: Context,
+        input: &[Message],
+    ) -> Result<AgentState, Error> {
+        if context.get::<RunId>().is_none() {
+            context.insert(RunId(generate_id()));
+        }
+
+        let mut messages = Vec::new();
+        if let Some(cp) = &self.checkpointer
+            && let Some(tid) = context.get::<ThreadId>()
+        {
+            messages.extend(cp.load(&tid.0).await?.into_iter().map(Message::from));
+        }
+
+        if let Some(prompt) = &self.system_prompt {
+            apply_system_prompt(&mut messages, prompt);
+        }
+        messages.extend_from_slice(input);
+        if !messages
+            .first()
+            .is_some_and(|message| message.role == Role::System)
+        {
+            messages.insert(0, Message::system(DEFAULT_SYSTEM_PROMPT));
+        }
+
+        Ok(AgentState { messages, context })
+    }
+
+    async fn run(&self, state: &mut AgentState, pending: &mut Vec<Message>) -> Result<(), Error> {
         for middleware in &self.middlewares {
             middleware.before_agent(state).await?;
         }
@@ -431,7 +421,7 @@ impl Agent {
             }
 
             let response = model.handle(self.build_request(state)).await?;
-            state.messages.push(response.message.clone());
+            record_message(state, pending, response.message.clone());
 
             for middleware in &self.middlewares {
                 middleware.after_model(state).await?;
@@ -439,7 +429,7 @@ impl Agent {
 
             if response.message.tool_calls.is_empty() {
                 // persist if last
-                self.persist_step(state, cursor).await?;
+                self.persist_step(state, pending).await?;
                 break;
             }
 
@@ -460,14 +450,13 @@ impl Agent {
                         if direct.is_none() && returns_direct(&self.tools, &call.name) {
                             direct = Some(content.clone());
                         }
-                        state.messages.push(Message::tool(call.id.clone(), content));
+                        record_message(state, pending, Message::tool(call.id.clone(), content));
                     }
                     Err(error) if self.config.abort_on_tool_error => return Err(error),
                     Err(error) => {
-                        state.messages.push(Message::tool_error(
-                            call.id.clone(),
-                            format!("Error: {error}"),
-                        ));
+                        let message =
+                            Message::tool_error(call.id.clone(), format!("Error: {error}"));
+                        record_message(state, pending, message);
                     }
                 }
             }
@@ -476,14 +465,12 @@ impl Agent {
             // the last assistant message and end the run without another model
             // call.
             if let Some(content) = direct {
-                state
-                    .messages
-                    .push(Message::assistant(direct_answer(&content)));
-                self.persist_step(state, cursor).await?;
+                record_message(state, pending, Message::assistant(direct_answer(&content)));
+                self.persist_step(state, pending).await?;
                 break;
             }
 
-            self.persist_step(state, cursor).await?;
+            self.persist_step(state, pending).await?;
             steps += 1;
         }
 
@@ -502,9 +489,29 @@ impl Agent {
         request
     }
 
-    /// Persists messages produced since `cursor` and advances it.
-    async fn persist_step(&self, state: &mut AgentState, cursor: &mut usize) -> Result<(), Error> {
-        persist_step_stream(&self.checkpointer, state, cursor).await
+    /// Persists the new conversation messages accumulated for this step.
+    async fn persist_step(
+        &self,
+        state: &AgentState,
+        pending: &mut Vec<Message>,
+    ) -> Result<(), Error> {
+        if !pending.is_empty()
+            && let Some(cp) = &self.checkpointer
+            && let Some(tid) = state.context.get::<ThreadId>()
+        {
+            let run_id = state
+                .context
+                .get::<RunId>()
+                .cloned()
+                .unwrap_or_else(|| RunId(generate_id()));
+            let stored = pending
+                .iter()
+                .map(|message| CheckpointMessage::from_message(message, &tid.0, &run_id.0))
+                .collect();
+            cp.append(&tid.0, stored).await?;
+        }
+        pending.clear();
+        Ok(())
     }
 
     /// Returns the long-term store, if configured.
@@ -512,6 +519,8 @@ impl Agent {
         self.store.as_ref()
     }
 }
+
+const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
 
 /// Installs the configured system prompt as the first message of `messages`.
 ///
@@ -633,7 +642,10 @@ impl AgentBuilder {
         self
     }
 
-    /// Prepends a system message to every run.
+    /// Sets the leading system prompt for every run.
+    ///
+    /// Without an explicit prompt, the agent keeps a leading system message
+    /// from the conversation or uses "You are a helpful assistant."
     pub fn system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
         self
@@ -716,37 +728,8 @@ fn generate_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-/// Persists messages produced since `cursor` and advances it. Stream-friendly
-/// variant that returns `Result` for `yield Err(e)` at the call site.
-async fn persist_step_stream(
-    checkpointer: &Option<Arc<dyn Checkpointer>>,
-    state: &AgentState,
-    cursor: &mut usize,
-) -> Result<(), Error> {
-    let Some(cp) = checkpointer else {
-        *cursor = state.messages.len();
-        return Ok(());
-    };
-    let Some(tid) = state.context.get::<ThreadId>().cloned() else {
-        *cursor = state.messages.len();
-        return Ok(());
-    };
-    let run_id = state
-        .context
-        .get::<RunId>()
-        .cloned()
-        .unwrap_or_else(|| RunId(generate_id()));
-
-    if *cursor >= state.messages.len() {
-        return Ok(());
-    }
-
-    let stored: Vec<CheckpointMessage> = state.messages[*cursor..]
-        .iter()
-        .map(|m| CheckpointMessage::from_message(m, &tid.0, &run_id.0))
-        .collect();
-
-    cp.append(&tid.0, stored).await?;
-    *cursor = state.messages.len();
-    Ok(())
+/// Adds a runtime-produced message to the conversation and the pending checkpoint.
+fn record_message(state: &mut AgentState, pending: &mut Vec<Message>, message: Message) {
+    pending.push(message.clone());
+    state.messages.push(message);
 }

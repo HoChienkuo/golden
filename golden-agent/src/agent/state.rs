@@ -6,6 +6,9 @@ use super::context::Context;
 #[derive(Debug, Clone, Default)]
 pub struct AgentState {
     /// The full conversation: system, user, assistant, and tool messages.
+    ///
+    /// Changes made by middleware affect the live conversation. Checkpoints
+    /// save the original input and messages produced by the agent.
     pub messages: Vec<Message>,
     /// The read-only inputs of this run, supplied by the caller.
     pub context: Context,
