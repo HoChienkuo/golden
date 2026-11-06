@@ -5,9 +5,9 @@ use crate::error::Error;
 
 /// Metadata for a model returned by a provider's model-listing endpoint.
 ///
-/// Provider APIs do not consistently expose capability metadata. In particular,
-/// official OpenAI, DeepSeek, and Anthropic model-listing responses may omit
-/// [`context_window`](Self::context_window), in which case it is `None`.
+/// Provider APIs expose different capability metadata. For example, DeepSeek
+/// can return [`context_window`](Self::context_window), which is `None` when
+/// the response omits that field.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelInfo {
     /// The model id accepted by [`crate::ChatRequest`].
@@ -24,6 +24,12 @@ pub struct ModelInfo {
     /// The maximum context window in tokens, when supplied by the provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
+    /// The maximum input size in tokens, when supplied by the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_input_tokens: Option<u64>,
+    /// The maximum output size in tokens, when supplied by the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
 }
 
 impl ModelInfo {
@@ -35,6 +41,8 @@ impl ModelInfo {
             owned_by: None,
             created_at: None,
             context_window: None,
+            max_input_tokens: None,
+            max_output_tokens: None,
         }
     }
 

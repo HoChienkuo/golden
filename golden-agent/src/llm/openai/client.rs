@@ -66,10 +66,9 @@ impl OpenAiLlm {
 
     /// Fetches the models exposed by this OpenAI-compatible server.
     ///
-    /// Official OpenAI and DeepSeek model-listing responses do not currently
-    /// include context-window sizes, so [`ModelInfo::context_window`] is usually
-    /// `None`. Compatible servers that return a `context_window` field are
-    /// supported.
+    /// DeepSeek and other compatible servers can return a display name in
+    /// `name` and a context-window size in `context_window`. These fields
+    /// remain optional because the OpenAI model-listing schema omits them.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
         let mut request = self.http.get(self.endpoint("/models"));
         if !self.api_key.is_empty() {
@@ -316,6 +315,8 @@ struct ModelsResponse {
 struct ModelObject {
     id: String,
     #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
     owned_by: Option<String>,
     #[serde(default)]
     created: Option<u64>,
@@ -327,10 +328,12 @@ impl From<ModelObject> for ModelInfo {
     fn from(model: ModelObject) -> Self {
         Self {
             id: model.id,
-            display_name: None,
+            display_name: model.name,
             owned_by: model.owned_by,
             created_at: model.created.map(|created| created.to_string()),
             context_window: model.context_window,
+            max_input_tokens: None,
+            max_output_tokens: None,
         }
     }
 }
@@ -414,6 +417,7 @@ mod tests {
                 "object": "model",
                 "created": 1_700_000_000,
                 "owned_by": "openai",
+                "name": "Test Model",
                 "context_window": 128_000
             }]
         }))
@@ -424,10 +428,12 @@ mod tests {
             models,
             vec![ModelInfo {
                 id: "gpt-test".to_string(),
-                display_name: None,
+                display_name: Some("Test Model".to_string()),
                 owned_by: Some("openai".to_string()),
                 created_at: Some("1700000000".to_string()),
                 context_window: Some(128_000),
+                max_input_tokens: None,
+                max_output_tokens: None,
             }]
         );
     }
@@ -440,6 +446,7 @@ mod tests {
         .unwrap();
         let model = ModelInfo::from(response.data.into_iter().next().unwrap());
 
+        assert_eq!(model.display_name, None);
         assert_eq!(model.context_window, None);
     }
 

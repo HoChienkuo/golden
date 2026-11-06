@@ -64,9 +64,9 @@ impl AnthropicLlm {
     /// Fetches all models available to the configured Anthropic credentials.
     ///
     /// Anthropic's endpoint is paginated, so this method follows `after_id`
-    /// cursors until every page has been collected. The official response does
-    /// not currently include context-window sizes; compatible responses that do
-    /// include `context_window` are supported.
+    /// cursors until every page has been collected. The official response
+    /// reports input and output limits separately as `max_input_tokens` and
+    /// `max_tokens`.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
         let mut models = Vec::new();
         let mut after_id: Option<String> = None;
@@ -224,6 +224,10 @@ struct ModelObject {
     created_at: Option<String>,
     #[serde(default)]
     context_window: Option<u64>,
+    #[serde(default)]
+    max_input_tokens: Option<u64>,
+    #[serde(default)]
+    max_tokens: Option<u64>,
 }
 
 impl From<ModelObject> for ModelInfo {
@@ -234,6 +238,8 @@ impl From<ModelObject> for ModelInfo {
             owned_by: Some("anthropic".to_string()),
             created_at: model.created_at,
             context_window: model.context_window,
+            max_input_tokens: model.max_input_tokens,
+            max_output_tokens: model.max_tokens,
         }
     }
 }
@@ -504,7 +510,8 @@ mod tests {
                 "id": "claude-test",
                 "display_name": "Claude Test",
                 "created_at": "2026-01-01T00:00:00Z",
-                "context_window": 200000
+                "max_input_tokens": 200000,
+                "max_tokens": 64000
             }],
             "has_more": true,
             "first_id": "claude-test",
@@ -521,7 +528,9 @@ mod tests {
                 display_name: Some("Claude Test".to_string()),
                 owned_by: Some("anthropic".to_string()),
                 created_at: Some("2026-01-01T00:00:00Z".to_string()),
-                context_window: Some(200_000),
+                context_window: None,
+                max_input_tokens: Some(200_000),
+                max_output_tokens: Some(64_000),
             }
         );
     }

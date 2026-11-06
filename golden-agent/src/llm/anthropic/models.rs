@@ -1,7 +1,7 @@
 /// Commonly used Anthropic models.
 ///
-/// Mirrors the model ids accepted by the Messages API, cross-checked against the
-/// `Model` type of the official SDK as of 2026-09. This is a curated set of the
+/// Mirrors the model ids accepted by the Messages API, cross-checked against Anthropic's
+/// model overview and lifecycle tables as of 2026-11-06. This is a curated set of the
 /// current models and is deliberately not exhaustive: dated snapshots (e.g.
 /// `claude-opus-4-5-20251101`), fine-tunes, and custom deployments are reached
 /// through [`AnthropicModel::Custom`].
@@ -20,16 +20,19 @@ pub enum AnthropicModel {
     /// `claude-mythos-5`
     ClaudeMythos5,
     /// `claude-mythos-preview`
+    #[deprecated(note = "deprecated by Anthropic; use `ClaudeMythos51` instead")]
     ClaudeMythosPreview,
     /// `claude-opus-5-5`
     ClaudeOpus55,
     /// `claude-opus-5`
     ClaudeOpus5,
     /// `claude-sonnet-5-5`
+    #[default]
     ClaudeSonnet55,
     /// `claude-sonnet-5`
-    #[default]
     ClaudeSonnet5,
+    /// `claude-haiku-5-5`
+    ClaudeHaiku55,
     // Claude 4.x family.
     /// `claude-opus-4-8`
     ClaudeOpus48,
@@ -42,14 +45,15 @@ pub enum AnthropicModel {
     /// `claude-sonnet-4-6`
     ClaudeSonnet46,
     /// `claude-sonnet-4-5`
+    #[deprecated(note = "retiring 2026-11-30; use `ClaudeSonnet55` instead")]
     ClaudeSonnet45,
     /// `claude-haiku-4-5`
     ClaudeHaiku45,
     // Legacy, deprecated.
-    #[deprecated(note = "no longer in the current model lineup; use `ClaudeSonnet5` or newer")]
+    #[deprecated(note = "no longer in the current model lineup; use `ClaudeSonnet55`")]
     /// `claude-3-5-sonnet-latest`
     Claude35Sonnet,
-    #[deprecated(note = "no longer in the current model lineup; use `ClaudeHaiku45` or newer")]
+    #[deprecated(note = "no longer in the current model lineup; use `ClaudeHaiku55`")]
     /// `claude-3-5-haiku-latest`
     Claude35Haiku,
     /// Any other model id, such as a dated snapshot or a custom deployment.
@@ -63,17 +67,16 @@ impl AnthropicModel {
         Self::ClaudeFable5,
         Self::ClaudeMythos51,
         Self::ClaudeMythos5,
-        Self::ClaudeMythosPreview,
         Self::ClaudeOpus55,
         Self::ClaudeOpus5,
         Self::ClaudeSonnet55,
         Self::ClaudeSonnet5,
+        Self::ClaudeHaiku55,
         Self::ClaudeOpus48,
         Self::ClaudeOpus47,
         Self::ClaudeOpus46,
         Self::ClaudeOpus45,
         Self::ClaudeSonnet46,
-        Self::ClaudeSonnet45,
         Self::ClaudeHaiku45,
     ];
 
@@ -95,6 +98,7 @@ impl AnthropicModel {
             AnthropicModel::ClaudeOpus5 => "claude-opus-5",
             AnthropicModel::ClaudeSonnet55 => "claude-sonnet-5-5",
             AnthropicModel::ClaudeSonnet5 => "claude-sonnet-5",
+            AnthropicModel::ClaudeHaiku55 => "claude-haiku-5-5",
             AnthropicModel::ClaudeOpus48 => "claude-opus-4-8",
             AnthropicModel::ClaudeOpus47 => "claude-opus-4-7",
             AnthropicModel::ClaudeOpus46 => "claude-opus-4-6",

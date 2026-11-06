@@ -1,6 +1,7 @@
 use crate::error::Error;
 use crate::llm::chat::{ChatModel, ChatRequest, ChatResponse, ChatStream};
 use crate::llm::http::HttpConfig;
+use crate::llm::models::{ModelCatalog, ModelInfo};
 use crate::llm::openai::OpenAiLlm;
 use async_trait::async_trait;
 
@@ -51,6 +52,18 @@ impl OllamaLlm {
     /// Exposes the underlying OpenAI protocol implementation.
     pub fn inner(&self) -> &OpenAiLlm {
         &self.0
+    }
+
+    /// Fetches the models exposed by the Ollama server at `/v1/models`.
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
+        self.0.list_models().await
+    }
+}
+
+#[async_trait]
+impl ModelCatalog for OllamaLlm {
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
+        OllamaLlm::list_models(self).await
     }
 }
 

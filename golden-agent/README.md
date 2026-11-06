@@ -56,6 +56,7 @@ streaming — live in
 - [x] Reasoning / thinking mode (DeepSeek `thinking`, OpenAI `reasoning_effort`, Anthropic extended thinking)
 - [x] Provider-neutral Fast Mode (OpenAI `service_tier: "fast"`, Anthropic `speed: "fast"`)
 - [x] Anthropic Messages API
+- [x] Model listing (OpenAI, DeepSeek, Anthropic, llama.cpp, Ollama)
 - [ ] Google Gemini API
 - [x] String / prompt templates
 - [x] Structured output (`response_format` and typed parsing)
