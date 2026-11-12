@@ -11,6 +11,12 @@ mod error;
 pub mod llm;
 pub mod store;
 pub mod tool;
+mod tools;
+
+pub use tools::{
+    CopyPathTool, CreateDirectoryTool, DeletePathTool, EditFileTool, FindPathTool, GrepTool,
+    ListDirectoryTool, MovePathTool, ReadFileTool, WriteFileTool,
+};
 
 pub use agent::{
     Agent, AgentBuilder, AgentConfig, AgentEvent, AgentResult, AgentState, AgentStream, Context,
