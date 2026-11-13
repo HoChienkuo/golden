@@ -86,30 +86,35 @@ impl OpenAiLlm {
         Ok(response.data.into_iter().map(ModelInfo::from).collect())
     }
 
+    pub(crate) fn wire_request(&self, request: &ChatRequest, stream: bool) -> super::ChatRequest {
+        let body = translate::to_wire_request(request, stream, self.supports_fast_mode);
+        if stream {
+            body.stream_options(super::request::StreamOptions::include_usage())
+        } else {
+            body
+        }
+    }
+
     fn endpoint(&self, path: &str) -> String {
         format!("{}{}", self.base_url.trim_end_matches('/'), path)
     }
-}
 
-#[async_trait]
-impl ModelCatalog for OpenAiLlm {
-    async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
-        OpenAiLlm::list_models(self).await
-    }
-}
-
-#[async_trait]
-impl ChatModel for OpenAiLlm {
-    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
-        let body = translate::to_wire_request(request, false, self.supports_fast_mode);
-
+    fn completion_request(&self, body: &impl serde::Serialize) -> reqwest::RequestBuilder {
         let mut req = self
             .http
             .post(self.endpoint("/chat/completions"))
-            .json(&body);
+            .json(body);
         if !self.api_key.is_empty() {
             req = req.bearer_auth(&self.api_key);
         }
+        req
+    }
+
+    pub(crate) async fn chat_wire(
+        &self,
+        body: &(impl serde::Serialize + Sync),
+    ) -> Result<ChatResponse, Error> {
+        let req = self.completion_request(body);
         let response = self.config.bound(req).send().await?;
 
         let status = response.status();
@@ -122,19 +127,9 @@ impl ChatModel for OpenAiLlm {
         Ok(translate::from_wire_response(response))
     }
 
-    fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
-        let body = translate::to_wire_request(request, true, self.supports_fast_mode)
-            .stream_options(super::request::StreamOptions::include_usage());
-
-        let http = self.http.clone();
-        let api_key = self.api_key.clone();
-        let url = self.endpoint("/chat/completions");
-
+    pub(crate) fn chat_stream_wire(&self, body: &impl serde::Serialize) -> ChatStream<'_> {
+        let req = self.completion_request(body);
         Box::pin(async_stream::stream! {
-            let mut req = http.post(&url).json(&body);
-            if !api_key.is_empty() {
-                req = req.bearer_auth(&api_key);
-            }
             let response = match req.send().await {
                 Ok(response) => response,
                 Err(error) => { yield Err(Error::Request(error)); return; }
@@ -160,6 +155,24 @@ impl ChatModel for OpenAiLlm {
                 yield item;
             }
         })
+    }
+}
+
+#[async_trait]
+impl ModelCatalog for OpenAiLlm {
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, Error> {
+        OpenAiLlm::list_models(self).await
+    }
+}
+
+#[async_trait]
+impl ChatModel for OpenAiLlm {
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
+        self.chat_wire(&self.wire_request(request, false)).await
+    }
+
+    fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
+        self.chat_stream_wire(&self.wire_request(request, true))
     }
 }
 

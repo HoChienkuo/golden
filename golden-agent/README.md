@@ -53,7 +53,7 @@ streaming — live in
 - [x] Non-streaming and streaming chat
 - [x] OpenAI-compatible protocol (OpenAI, DeepSeek, llama.cpp, Ollama)
 - [x] `#[tool]` tool declaration, registration, and per-provider rendering
-- [x] Reasoning / thinking mode (DeepSeek `thinking`, OpenAI `reasoning_effort`, Anthropic extended thinking)
+- [x] Reasoning / thinking mode (DeepSeek `thinking`, OpenAI `reasoning_effort`, llama.cpp `reasoning_effort` and template controls, Anthropic extended thinking)
 - [x] Provider-neutral Fast Mode (OpenAI `service_tier: "fast"`, Anthropic `speed: "fast"`)
 - [x] Anthropic Messages API
 - [x] Model listing (OpenAI, DeepSeek, Anthropic, llama.cpp, Ollama)
