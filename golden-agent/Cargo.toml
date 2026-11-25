@@ -23,7 +23,7 @@ tempfile.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
 inventory.workspace = true
-golden-macros = { version = "0.1.11", path = "../golden-macros", features = ["agent"] }
+golden-macros = { version = "0.1.12", path = "../golden-macros", features = ["agent"] }
 sqlx = { workspace = true, optional = true}
 uuid.workspace = true
 
