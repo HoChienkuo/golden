@@ -14,8 +14,8 @@ pub mod tool;
 mod tools;
 
 pub use tools::{
-    CopyPathTool, CreateDirectoryTool, DeletePathTool, EditFileTool, FindPathTool, GrepTool,
-    ListDirectoryTool, MovePathTool, ReadFileTool, WriteFileTool,
+    CopyPathTool, CreateDirectoryTool, DeletePathTool, EditFileTool, FetchTool, FindPathTool,
+    GrepTool, ListDirectoryTool, MovePathTool, ReadFileTool, TerminalTool, WriteFileTool,
 };
 
 pub use agent::{

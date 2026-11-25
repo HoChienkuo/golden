@@ -29,6 +29,7 @@ tokio = {
         "rt-multi-thread",
         "macros",
         "net",
+        "process",
         "signal",
         "time",
     ]

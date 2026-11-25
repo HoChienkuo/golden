@@ -2,12 +2,14 @@ mod copy_path;
 mod create_directory;
 mod delete_path;
 mod edit_file;
+mod fetch;
 mod find_path;
 mod grep;
 mod list_directory;
 mod move_path;
 mod mutation;
 mod read_file;
+mod terminal;
 mod workspace;
 mod write_file;
 
@@ -15,11 +17,13 @@ pub use copy_path::CopyPathTool;
 pub use create_directory::CreateDirectoryTool;
 pub use delete_path::DeletePathTool;
 pub use edit_file::EditFileTool;
+pub use fetch::FetchTool;
 pub use find_path::FindPathTool;
 pub use grep::GrepTool;
 pub use list_directory::ListDirectoryTool;
 pub use move_path::MovePathTool;
 pub use read_file::ReadFileTool;
+pub use terminal::TerminalTool;
 pub use write_file::WriteFileTool;
 
 #[cfg(test)]

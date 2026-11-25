@@ -27,6 +27,14 @@ impl Workspace {
         })
     }
 
+    pub(super) fn root(&self) -> Arc<Path> {
+        Arc::clone(&self.root)
+    }
+
+    pub(super) fn tool(&self) -> &'static str {
+        self.tool
+    }
+
     pub(super) fn run<A: DeserializeOwned + Send + 'static>(
         &self,
         args: Value,
