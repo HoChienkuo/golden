@@ -1,10 +1,13 @@
+use std::sync::{Arc, Mutex};
+
 use crate::{
     Agent, AgentEvent, AgentState, ChatEvent, ChatModel, ChatRequest, ChatResponse, ChatStream,
     CheckpointMessage, Checkpointer, Context, DynamicPrompt, Error, InMemoryCheckpointer, Message,
-    Role, ThreadId, Usage,
+    Role, ThreadId, ToolCall, ToolSet, Usage,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use serde_json::json;
 
 struct EchoSystemPrompt;
 
@@ -60,6 +63,123 @@ async fn default_prompt_preserves_an_existing_leading_system_message() {
         .await
         .unwrap();
     assert_eq!(result.text(), "custom");
+}
+
+#[derive(Clone, Default)]
+struct RecordingModel {
+    calls: Arc<Mutex<Vec<usize>>>,
+}
+
+#[async_trait]
+impl ChatModel for RecordingModel {
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, Error> {
+        self.record(request);
+        Ok(ChatResponse {
+            id: "mock".into(),
+            model: "mock".into(),
+            message: Message::assistant("done"),
+            finish_reason: None,
+            usage: Some(usage()),
+            inference_speed: None,
+        })
+    }
+
+    fn chat_stream(&self, request: &ChatRequest) -> ChatStream<'_> {
+        self.record(request);
+        let first = {
+            let calls = self.calls.lock().expect("calls mutex poisoned");
+            calls.len() == 1
+        };
+        let events = if first {
+            vec![
+                Ok(ChatEvent::Text("thinking".into())),
+                Ok(ChatEvent::ToolCall(ToolCall {
+                    id: "call-1".into(),
+                    name: "calculate".into(),
+                    arguments: json!({ "result": 36 }).to_string(),
+                })),
+                Ok(ChatEvent::Usage(usage())),
+            ]
+        } else {
+            vec![Ok(ChatEvent::Text("extra model call".into()))]
+        };
+        Box::pin(futures_util::stream::iter(events))
+    }
+}
+
+impl RecordingModel {
+    fn record(&self, request: &ChatRequest) {
+        let mut calls = self.calls.lock().expect("calls mutex poisoned");
+        calls.push(request.messages.len());
+    }
+}
+
+#[tokio::test]
+async fn stream_stops_after_a_return_direct_tool() {
+    let model = RecordingModel::default();
+    let agent = Agent::builder()
+        .model(model.clone())
+        .request(ChatRequest::new("mock"))
+        .tools(ToolSet::new().with_tool(CalculateTool))
+        .build()
+        .unwrap();
+
+    let mut stream = agent.stream(Message::user("what is 12 * 3?"));
+    assert_eq!(
+        stream.next().await.unwrap().unwrap(),
+        AgentEvent::Text("thinking".into())
+    );
+    assert_eq!(
+        stream.next().await.unwrap().unwrap(),
+        AgentEvent::ToolCall(ToolCall {
+            id: "call-1".into(),
+            name: "calculate".into(),
+            arguments: json!({ "result": 36 }).to_string(),
+        })
+    );
+    assert_eq!(
+        stream.next().await.unwrap().unwrap(),
+        AgentEvent::ToolResult {
+            call: ToolCall {
+                id: "call-1".into(),
+                name: "calculate".into(),
+                arguments: json!({ "result": 36 }).to_string(),
+            },
+            content: "{\"result\":36}".into(),
+        }
+    );
+    assert_eq!(stream.next().await.unwrap().unwrap(), AgentEvent::Done);
+    assert!(stream.next().await.is_none());
+
+    let calls = model.calls.lock().expect("calls mutex poisoned");
+    assert_eq!(calls.as_slice(), &[2]);
+}
+
+struct CalculateTool;
+
+impl crate::Tool for CalculateTool {
+    fn spec(&self) -> crate::ToolSpec {
+        crate::ToolSpec::new(
+            "calculate",
+            "Return a calculated result.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "result": { "type": "integer" }
+                },
+                "required": ["result"]
+            }),
+        )
+        .with_return_direct(true)
+    }
+
+    fn call(
+        &self,
+        args: serde_json::Value,
+    ) -> futures_util::future::BoxFuture<'static, Result<String, Error>> {
+        let result = args.get("result").cloned().unwrap_or_default();
+        Box::pin(async move { Ok(json!({ "result": result }).to_string()) })
+    }
 }
 
 #[tokio::test]

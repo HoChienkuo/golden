@@ -254,7 +254,7 @@ impl Agent {
 
                 let mut step_request = request.clone();
                 step_request.messages = state.messages.clone();
-                step_request.tools = tools.specs();
+                step_request.tools = self.tools.specs();
 
                 let mut text = String::new();
                 let mut reasoning = String::new();
@@ -359,7 +359,7 @@ impl Agent {
                 // the calls finished in. (flatten() preserves index order.)
                 let mut direct: Option<String> = None;
                 for (call, content, ok) in results.into_iter().flatten() {
-                    if ok && direct.is_none() && returns_direct(&tools, &call.name) {
+                    if ok && direct.is_none() && returns_direct(&self.tools, &call.name) {
                         direct = Some(content.clone());
                     }
                     let message = if ok {

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, sync::RwLock};
 
 use async_trait::async_trait;
 
@@ -7,7 +7,7 @@ use crate::checkpointer::{CheckpointMessage, Checkpointer};
 
 #[derive(Debug, Default)]
 pub struct InMemoryCheckpointer {
-    threads: Mutex<HashMap<String, ThreadState>>,
+    threads: RwLock<HashMap<String, ThreadState>>,
 }
 
 #[derive(Debug, Default)]
@@ -26,7 +26,13 @@ impl InMemoryCheckpointer {
 #[async_trait]
 impl Checkpointer for InMemoryCheckpointer {
     async fn load(&self, thread_id: &str) -> Result<Vec<CheckpointMessage>, Error> {
-        let threads = self.threads.lock().expect("mutex poisoned");
+        // The lock is only ever held across synchronous work, never an await.
+        // A poisoned lock still holds valid data (nothing here can leave it
+        // inconsistent), so recover the guard instead of propagating the panic.
+        let threads = self
+            .threads
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(state) = threads.get(thread_id) else {
             return Ok(Vec::new());
         };
@@ -41,7 +47,10 @@ impl Checkpointer for InMemoryCheckpointer {
     }
 
     async fn append(&self, thread_id: &str, messages: Vec<CheckpointMessage>) -> Result<(), Error> {
-        let mut threads = self.threads.lock().expect("mutex posioned");
+        let mut threads = self
+            .threads
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let state = threads.entry(thread_id.to_string()).or_default();
         for mut message in messages {
             message.thread_id = thread_id.to_string();
@@ -61,7 +70,10 @@ impl Checkpointer for InMemoryCheckpointer {
         if ids.is_empty() {
             return Ok(());
         }
-        let mut threads = self.threads.lock().expect("mutex poisoned");
+        let mut threads = self
+            .threads
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(state) = threads.get_mut(thread_id) else {
             return Ok(());
         };

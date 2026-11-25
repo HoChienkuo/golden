@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "golden-agent"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "async-stream",
  "async-trait",

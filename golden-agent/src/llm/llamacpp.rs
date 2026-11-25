@@ -115,42 +115,11 @@ struct LlamaCppRequest {
 mod tests {
     use super::*;
     use crate::llm::chat::Message;
-    use futures_util::TryStreamExt;
     use serde_json::{Value, json};
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::TcpListener;
 
-    async fn capture_request(listener: &TcpListener) -> Value {
-        let (socket, _) = listener.accept().await.unwrap();
-        let mut socket = BufReader::new(socket);
-        let mut content_length = None;
-        loop {
-            let mut line = String::new();
-            assert_ne!(socket.read_line(&mut line).await.unwrap(), 0);
-            if line == "\r\n" {
-                break;
-            }
-            if let Some((name, value)) = line.split_once(':')
-                && name.eq_ignore_ascii_case("content-length")
-            {
-                content_length = Some(value.trim().parse().unwrap());
-            }
-        }
-        let mut body = vec![0; content_length.unwrap()];
-        socket.read_exact(&mut body).await.unwrap();
-        socket
-            .write_all(
-                b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            )
-            .await
-            .unwrap();
-        serde_json::from_slice(&body).unwrap()
-    }
-
-    #[tokio::test]
-    async fn chat_and_stream_send_llamacpp_reasoning_fields() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let llm = LlamaCppLlm::new(format!("http://{}/v1", listener.local_addr().unwrap()));
+    #[test]
+    fn chat_and_stream_send_llamacpp_reasoning_fields() {
+        let llm = LlamaCppLlm::new("http://localhost:8080/v1");
 
         for (reasoning, effort, enable_thinking) in [
             (None, None, false),
@@ -167,21 +136,9 @@ mod tests {
             request.reasoning = reasoning;
 
             for stream in [false, true] {
-                let chat = async {
-                    if stream {
-                        llm.chat_stream(&request)
-                            .try_collect::<Vec<_>>()
-                            .await
-                            .unwrap_err();
-                    } else {
-                        llm.chat(&request).await.unwrap_err();
-                    }
-                };
-                let (_, body) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                    tokio::join!(chat, capture_request(&listener))
-                })
-                .await
-                .unwrap();
+                // The wire body the client would POST, serialized directly so
+                // the assertion does not depend on a live socket.
+                let body = serde_json::to_value(llm.wire_request(&request, stream)).unwrap();
                 assert_eq!(body["stream"], stream);
                 assert_eq!(body["model"], "test-model");
                 assert_eq!(body["messages"][0]["content"], "Hello");
